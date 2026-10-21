@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Meet – {{CODE}}</title>
+<style>
+  body { margin: 0; background: #202124; color: #e8eaed; font: 14px/1.4 "Google Sans", Roboto, Arial, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  .lobby { margin: auto; text-align: center; }
+  .lobby h1 { font-weight: 400; font-size: 28px; }
+  .lobby button, .bar button, .left button { font: inherit; }
+  .join { background: #8ab4f8; color: #202124; border: 0; border-radius: 24px; padding: 12px 24px; font-weight: 500; cursor: pointer; }
+  .stage { flex: 1; display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; padding: 16px 16px 0; }
+  .tile { position: relative; background: #3c4043; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .tile video { width: 100%; height: 100%; object-fit: cover; }
+  .tile.big { grid-row: 1 / 3; }
+  .tile .name { position: absolute; left: 12px; bottom: 10px; background: rgba(0,0,0,.45); padding: 4px 8px; border-radius: 6px; font-size: 13px; }
+  .bar { display: flex; justify-content: center; gap: 10px; padding: 14px; }
+  .bar button { width: 48px; height: 48px; border-radius: 50%; border: 0; background: #3c4043; color: #e8eaed; cursor: pointer; }
+  .bar button#leave { background: #ea4335; width: 64px; }
+  .bar button[aria-pressed="true"] { background: #8ab4f8; color: #202124; }
+  .google-symbols { font-family: monospace; font-size: 11px; }
+  .footer { position: fixed; left: 16px; bottom: 22px; font-size: 14px; }
+  .iOzk7 { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); width: 640px; max-height: 140px; overflow: hidden; }
+  .vNKgIf { display: flex; flex-direction: column; gap: 8px; }
+  .nMcdL { display: flex; gap: 10px; align-items: flex-start; }
+  .adE6rb { display: flex; gap: 8px; align-items: center; min-width: 150px; }
+  .adE6rb img { width: 28px; height: 28px; border-radius: 50%; }
+  .NWpY1d { font-weight: 500; }
+  .ygicle { font-size: 18px; text-shadow: 0 1px 2px #000; }
+  .left { margin: auto; text-align: center; }
+  .left h1 { font-weight: 400; font-size: 28px; }
+  .left button { margin: 6px; padding: 10px 18px; border-radius: 20px; border: 1px solid #5f6368; background: transparent; color: #8ab4f8; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+(() => {
+  const CODE = location.pathname.replace(/^\//, '') || 'abc-defg-hij';
+  const app = document.getElementById('app');
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const streams = [];
+
+  // A moving camera picture and a presentation whose "slide" changes every few seconds.
+  function cameraStream(hue) {
+    const c = document.createElement('canvas'); c.width = 640; c.height = 360;
+    const ctx = c.getContext('2d'); let t = 0;
+    const draw = () => { t += 0.05; ctx.fillStyle = `hsl(${hue} 30% 25%)`; ctx.fillRect(0, 0, 640, 360); ctx.fillStyle = `hsl(${hue} 60% 60%)`; ctx.beginPath(); ctx.arc(320 + Math.sin(t) * 120, 180 + Math.cos(t * 1.3) * 60, 70, 0, 7); ctx.fill(); requestAnimationFrame(draw); };
+    draw();
+    const s = c.captureStream(15); streams.push(s); return s;
+  }
+  let slide = 1;
+  function presentationStream() {
+    const c = document.createElement('canvas'); c.width = 1600; c.height = 900;
+    const ctx = c.getContext('2d');
+    const draw = () => {
+      ctx.fillStyle = ['#fdf6e3', '#e8f0fe', '#fce8e6', '#e6f4ea'][slide % 4]; ctx.fillRect(0, 0, 1600, 900);
+      ctx.fillStyle = '#202124'; ctx.font = 'bold 96px sans-serif'; ctx.fillText('Slide ' + slide, 120, 220);
+      ctx.font = '48px sans-serif'; ctx.fillText('Design rules we agreed on', 120, 340);
+      ctx.fillStyle = ['#1a73e8', '#d93025', '#188038', '#f9ab00'][slide % 4]; ctx.fillRect(120, 420, 400 + (slide % 3) * 200, 160);
+    };
+    draw();
+    setInterval(draw, 400);          // keep frames flowing even when nothing changes
+    setInterval(() => { slide++; draw(); }, 5000);
+    const s = c.captureStream(5); streams.push(s); return s;
+  }
+
+  function lobby() {
+    document.title = 'Meet – ' + CODE;
+    app.innerHTML = `<div class="lobby"><h1>Ready to join?</h1><p>Weekly design sync</p><button class="join" id="join">Join now</button></div>`;
+    document.getElementById('join').onclick = call;
+  }
+
+  function call() {
+    document.title = 'Weekly design sync - Google Meet';
+    app.innerHTML = `
+      <div class="stage" id="stage">
+        <div class="tile" data-participant-id="spaces/x/devices/2"><video id="cam2" autoplay muted playsinline></video><div class="name">Priya Natarajan</div></div>
+        <div class="tile" data-participant-id="spaces/x/devices/self"><video id="selfcam" autoplay muted playsinline style="transform:scaleX(-1)"></video><div class="name"><span data-self-name="Jesh Shiva">You</span></div></div>
+      </div>
+      <div class="bar">
+        <button aria-label="Turn off microphone (ctrl + d)"><i class="google-symbols">mic</i></button>
+        <button aria-label="Turn off camera (ctrl + e)"><i class="google-symbols">videocam</i></button>
+        <button id="cc" aria-label="Turn on captions (c)" aria-pressed="false"><i class="google-symbols">closed_caption_off</i></button>
+        <button id="leave" aria-label="Leave call"><i class="google-symbols">call_end</i></button>
+      </div>
+      <div class="footer"><span class="u6vdEc">${esc(CODE)}</span></div>
+      <div jsname="dsyhDe" class="iOzk7" id="ccwrap" hidden><div tabindex="0" role="region" aria-label="Captions" class="vNKgIf UDinHf" id="region"></div></div>`;
+    document.getElementById('cam2').srcObject = cameraStream(200);
+    document.getElementById('selfcam').srcObject = cameraStream(30);
+    setTimeout(() => {
+      const stage = document.getElementById('stage'); if (!stage) return;
+      const tile = document.createElement('div');
+      tile.className = 'tile big'; tile.setAttribute('data-participant-id', 'spaces/x/devices/2-presentation');
+      tile.innerHTML = `<video id="pres" autoplay muted playsinline></video><div class="name">Priya Natarajan is presenting</div>`;
+      stage.prepend(tile);
+      tile.querySelector('video').srcObject = presentationStream();
+    }, 2500);
+    const cc = document.getElementById('cc');
+    cc.onclick = () => {
+      const on = cc.getAttribute('aria-pressed') !== 'true';
+      cc.setAttribute('aria-pressed', String(on));
+      cc.setAttribute('aria-label', on ? 'Turn off captions (c)' : 'Turn on captions (c)');
+      cc.querySelector('i').textContent = on ? 'closed_caption' : 'closed_caption_off';
+      document.getElementById('ccwrap').hidden = !on;
+      if (on) startCaptions();
+    };
+    document.getElementById('leave').onclick = left;
+  }
+
+  // The caption timeline: blocks grow, get revised, scroll at the front, get removed, and the whole
+  // region is re-rendered once, as Meet does.
+  const blocks = new Map();
+  function block(id, speaker, text) {
+    const el = document.createElement('div'); el.className = 'nMcdL bj4p3b';
+    el.innerHTML = `<div class="adE6rb"><img data-iml="1" src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==" alt=""><div class="KcIKyf jxFHg"><span class="NWpY1d"></span></div></div><div class="ygicle VbkSUe"></div>`;
+    el.querySelector('.NWpY1d').textContent = speaker; el.querySelector('.ygicle').textContent = text;
+    blocks.set(id, { el, speaker, text });
+    document.getElementById('region').appendChild(el);
+  }
+  const OPS = [
+    [300, 'new', 0, 'Priya Natarajan', 'Hi everyone'],
+    [900, 'set', 0, 'Hi everyone, thanks for joining'],
+    [1500, 'set', 0, 'Hi everyone, thanks for joining today'],
+    [2100, 'set', 0, 'Hi everyone, thanks for joining today. Let me share the design rules'],
+    [2700, 'set', 0, 'Hi everyone, thanks for joining today. Let me share the design rules we agreed on'],
+    [3300, 'set', 0, 'thanks for joining today. Let me share the design rules we agreed on last week'],
+    [3900, 'set', 0, 'Let me share the design rules we agreed on last week and the agenda'],
+    [4500, 'new', 1, 'You', 'Sounds good'],
+    [5100, 'set', 1, 'Sounds good, go ahead'],
+    [5700, 'new', 2, 'Sam Okafor', 'One question first'],
+    [6300, 'set', 2, 'One question first: is the generic layout out?'],
+    [6900, 'set', 2, 'One question first: is the generic layout out for good?'],
+    [7500, 'remove', 0],
+    [8100, 'set', 1, 'Sounds good, go ahead. Yes it is out'],
+    [8700, 'rerender'],
+    [9300, 'new', 3, 'Priya Natarajan', 'Great, moving on to the agenda'],
+    [9900, 'set', 3, 'Great, moving on to the agenda for today'],
+    [11000, 'new', 4, 'Sam Okafor', 'Can you zoom in on the second rule?'],
+    [12500, 'new', 5, 'You', 'Sure, one second'],
+  ];
+  let started = false;
+  function startCaptions() {
+    if (started) return; started = true;
+    for (const op of OPS) setTimeout(() => apply(op), op[0]);
+  }
+  function apply([, kind, id, a, b]) {
+    const region = document.getElementById('region'); if (!region) return;
+    if (kind === 'new') return block(id, a, b);
+    if (kind === 'set') { const x = blocks.get(id); if (x) { x.text = a; x.el.querySelector('.ygicle').textContent = a; } return; }
+    if (kind === 'remove') { const x = blocks.get(id); if (x) { x.el.remove(); blocks.delete(id); } return; }
+    if (kind === 'rerender') {
+      const current = [...blocks.entries()];
+      region.innerHTML = ''; blocks.clear();
+      for (const [bid, x] of current) block(bid, x.speaker, x.text);
+    }
+  }
+
+  function left() {
+    for (const s of streams) for (const t of s.getTracks()) t.stop();
+    document.title = 'Meet – ' + CODE;
+    app.innerHTML = `<div class="left"><h1>You left the meeting</h1><div><button id="rejoin">Rejoin</button><button id="home">Return to home screen</button></div></div>`;
+    document.getElementById('rejoin').onclick = call;
+  }
+
+  window.__fake = { OPS, blocks };
+  lobby();
+})();
+</script>
+</body>
+</html>

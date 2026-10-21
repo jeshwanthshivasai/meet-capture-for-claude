@@ -14,7 +14,24 @@ function test(name, fn) {
 
 // ------------------------------------------------------------------ stitch
 const st = (full, win, next) => M.stitch(full, win, next);
-test('stitch: first text starts the block', () => assert.deepStrictEqual(st('', '', 'Hello'), { full: 'Hello', win: 'Hello', how: 'start' }));
+test('stitch: first text starts the block', () => assert.deepStrictEqual(st('', '', 'Hello'), { full: 'Hello', win: 'Hello', how: 'start', added: 'Hello' }));
+test('stitch: short revisions that differ only in punctuation replace the window (seen in a real call)', () => {
+  let r = st('Hi!', 'Hi!', 'Hi, how?');
+  assert.strictEqual(r.full, 'Hi, how?');
+  r = st(r.full, r.win, 'Hi, how are you?');
+  assert.deepStrictEqual([r.full, r.how, r.added], ['Hi, how are you?', 'grow', 'are you?']);
+  r = st(r.full, r.win, 'Hi, how are you? So I have been looking');
+  assert.strictEqual(r.full, 'Hi, how are you? So I have been looking');
+});
+test('stitch: a new window that only shares a first word with a long one is not a revision', () => {
+  const r = st('I think we should start with the agenda for today', 'I think we should start with the agenda for today', 'I think so too');
+  assert.strictEqual(r.how, 'append');
+  assert.strictEqual(r.full, 'I think we should start with the agenda for today I think so too');
+});
+test('stitch: scroll overlap is matched on words, whatever the punctuation', () => {
+  const r = st('we agreed on the rules. Next, the agenda', 'we agreed on the rules. Next, the agenda', 'Next the agenda for today');
+  assert.deepStrictEqual([r.full, r.how, r.added], ['we agreed on the rules. Next the agenda for today', 'scroll', 'for today']);
+});
 test('stitch: the window grows', () => assert.strictEqual(st('Hello', 'Hello', 'Hello there').full, 'Hello there'));
 test('stitch: the last words are revised', () => assert.strictEqual(st('we should ship on tuesday', 'we should ship on tuesday', 'we should ship next tuesday morning').full, 'we should ship next tuesday morning'));
 test('stitch: the start scrolls out of view', () => {
@@ -107,6 +124,46 @@ test('detector: difference and blank', () => {
   assert.ok(M.difference(A, B) > 0.1);
   assert.ok(M.isBlank(BLANK));
   assert.ok(!M.isBlank(A));
+});
+
+test('transcript: one block that runs on is cut into lines at pauses', () => {
+  let t = 1000;
+  const tr = M.createTranscript({ now: () => t });
+  tr.upsert(1, 'You', 'Hi!');
+  t += 400; tr.upsert(1, 'You', 'Hi, how?');
+  t += 400; tr.upsert(1, 'You', 'Hi, how are you?');
+  t += 5000; tr.upsert(1, 'You', 'Hi, how are you? So I have been looking into these things');
+  t += 500; tr.upsert(1, 'You', 'Hi, how are you? So I have been looking into these things lately');
+  t += 500; tr.upsert(1, 'You', 'So I have been looking into these things lately over the weekend');
+  const lines = tr.allLines();
+  assert.deepStrictEqual(lines.map((l) => [l.id, l.text, l.startedAt, l.split]), [
+    ['1', 'Hi, how are you?', 1000, false],
+    ['1.1', 'So I have been looking into these things lately over the weekend', 6800, true],
+  ]);
+  assert.strictEqual(lines[0].updatedAt, 1800);
+});
+test('transcript: a long run breaks at a sentence end, and a cut never lands mid-word', () => {
+  let t = 0;
+  const tr = M.createTranscript({ now: () => t, longMs: 10000 });
+  let text = 'One.';
+  tr.upsert(1, 'A', text);
+  for (let i = 0; i < 12; i++) { t += 1000; text += ' two'; tr.upsert(1, 'A', text); }   // no sentence end yet: no cut
+  assert.strictEqual(tr.allLines().length, 1);
+  t += 1000; text += ' three.'; tr.upsert(1, 'A', text);
+  t += 1000; text += ' Four five'; tr.upsert(1, 'A', text);                                // after a sentence end, past 10 s: cut here
+  const lines = tr.allLines();
+  assert.strictEqual(lines.length, 2);
+  assert.strictEqual(lines[1].text, 'Four five');
+  t += 1000; text = text.replace('three.', 'three, yes.'); text += ' six'; tr.upsert(1, 'A', text); // a revision before the cut
+  const after = tr.allLines();
+  assert.strictEqual(after.length, 2);
+  assert.ok(after[0].text.endsWith('three, yes.'), after[0].text);
+  assert.strictEqual(after[1].text, 'Four five six');
+});
+test('transcript: lines of a block with no cuts keep the entry id as before', () => {
+  const tr = M.createTranscript({ now: () => 5 });
+  tr.upsert(7, 'B', 'Hello');
+  assert.deepStrictEqual(tr.allLines().map((l) => l.id), ['1']);
 });
 
 // ------------------------------------------------------------------ export

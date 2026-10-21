@@ -86,6 +86,8 @@ main { flex: 1; overflow: auto; padding: 12px 12px 20px; display: flex; flex-dir
 .pick li[aria-checked="true"] { border-color: var(--mint); box-shadow: 0 0 0 1px var(--mint); }
 .pick img, .pick .noimg { width: 72px; aspect-ratio: 16 / 9; border-radius: 4px; object-fit: cover; background: var(--card-2); display: grid; place-items: center; color: var(--muted); font-size: 11px; }
 .pick small { display: block; color: var(--muted); }
+.notice { background: color-mix(in srgb, var(--amber) 14%, transparent); border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; margin-bottom: 10px; }
+.notice b { font-weight: 650; }
 .done { background: color-mix(in srgb, var(--mint) 14%, transparent); border: 1px solid color-mix(in srgb, var(--mint) 45%, transparent); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; }
 .done b { font-weight: 650; }
 .done code { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }

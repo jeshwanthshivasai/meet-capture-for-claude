@@ -42,9 +42,9 @@ Downloads/Meet captures/2026-10-21 14.30 Weekly design sync/
 **[14:32:31] Jesh Shiva:** Sounds good, go ahead.
 ```
 
-Snapshots are listed at the top and marked in the transcript where they were taken, so Claude knows which image goes with which words. Your own lines, which Meet labels "You", get your name. Meet's captions are automatic speech recognition, so names and words can be wrong; the transcript says so.
+Snapshots are listed at the top and marked in the transcript where they were taken, so Claude knows which image goes with which words. Meet keeps one caption block for as long as one person talks, so a line is cut at pauses of a few seconds and, in long runs, at sentence ends; each line keeps the time its words started. Your own lines, which Meet labels "You", get your name, read from your Google account or from the setting. Meet's captions are automatic speech recognition, so names and words can be wrong; the transcript says so.
 
-**Snapshots** are taken from the video Meet is showing you. The extension picks the presentation when Meet marks one, otherwise the widest video on the page. You can pick a different one in the panel. Three modes: when the shared screen changes (the default), on a timer, or both; or off, for manual snapshots only. If you're the one presenting and Meet shows you no preview of your own share, the panel can capture your screen share directly.
+**Snapshots** are taken from the video Meet is showing you. The extension picks the presentation when Meet marks one, otherwise the widest video on the page. You can pick a different one in the panel. Three modes: when the shared screen changes (the default), on a timer, or both; or off, for manual snapshots only. If you're the one presenting, Meet shows you no preview of your own share, so there is nothing on the page to snapshot: the pill and the panel say so, and **Capture your own screen share** in the panel takes the snapshots from Chrome's screen picker instead.
 
 You can also export mid-call (**Export so far**), copy the transcript to paste anywhere, or get everything as one ZIP instead of a folder. Captured meetings stay in the panel for 30 days (you can change that), so you can export or copy a past call again.
 

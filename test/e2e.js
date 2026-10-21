@@ -66,7 +66,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await panel.waitForSelector('.live', { timeout: 3000 });
 
   // 4. Leave the call: the export runs by itself.
-  await sleep(3000); // let the caption timeline finish
+  await page.waitForFunction(() => window.__fake && window.__fake.done, null, { timeout: 30000 }); // the caption timeline is over
+  await sleep(1500);
   await page.bringToFront();
   await page.click('#leave');
   await panel.bringToFront();
@@ -86,6 +87,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     expectOnce('Sounds good, go ahead. Yes it is out');
     expectOnce('One question first: is the generic layout out for good?');
     expectOnce('Great, moving on to the agenda for today');
+    expectOnce('Hi, how are you?');
+    expectOnce('Jesh Shiva:** So I have been looking into these things lately over the weekend and I think we can connect');
+    if (/Hi, how are you\? So I have been/.test(text)) errors.push('the long block was not cut into two lines at the pause');
     if (!/\*\*\[\d\d:\d\d:\d\d\] Jesh Shiva:\*\* Sounds good/.test(text)) errors.push('"You" was not replaced by the name from the self tile');
     if (!text.includes('📷 Snapshot 1')) errors.push('no snapshot marker in the transcript');
     if (!text.includes('## For Claude')) errors.push('the preface is missing');

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Meet Capture for Claude",
   "short_name": "Meet Capture",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Unofficial. Saves Google Meet captions and screen-share snapshots into one Claude-ready file, locally. No bot, no account.",
   "minimum_chrome_version": "116",
   "icons": {

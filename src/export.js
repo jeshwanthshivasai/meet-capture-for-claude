@@ -17,21 +17,30 @@
     return me ? lines.map((l) => ({ ...l, speaker: NS.speakerAlias(l.speaker, me) })) : lines;
   }
 
-  /** Lines merged where Meet split one person's words into back-to-back blocks a moment apart. */
+  const byTime = (a, b) => (a.startedAt - b.startedAt) || String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
+
+  /** Lines in time order, merged where Meet split one person's words into back-to-back blocks a moment apart. */
   function tidyLines(lines) {
     const out = [];
-    for (const l of lines) {
+    for (const l of [...lines].sort(byTime)) {
       const text = NS.normalize(l.text);
       if (!text) continue;
       const prev = out[out.length - 1];
       if (prev && prev.speaker === l.speaker) {
         if (prev.text === text || prev.text.endsWith(text)) continue;             // the same words again
         if (text.startsWith(prev.text)) { prev.text = text; prev.updatedAt = l.updatedAt; continue; } // a longer version
-        if (l.startedAt - prev.updatedAt < 2500) { prev.text += ' ' + text; prev.updatedAt = l.updatedAt; continue; }
+        if (!l.split && l.startedAt - prev.updatedAt < 2500) { prev.text += ' ' + text; prev.updatedAt = l.updatedAt; continue; }
       }
       out.push({ speaker: l.speaker, text, startedAt: l.startedAt, updatedAt: l.updatedAt });
     }
     return out;
+  }
+
+  /** The meeting's name for the top of the transcript; an unnamed call is shown by its code. */
+  function titleOf(meeting) {
+    const t = NS.normalize(meeting.title || '');
+    if (t && t !== meeting.code) return t;
+    return `Google Meet ${meeting.code || ''}`.trim();
   }
 
   function escapeMd(s) { return String(s).replace(/([\\`*_[\]<>#])/g, '\\$1'); }
@@ -43,7 +52,7 @@
     const start = meeting.startedAt, end = meeting.endedAt || meeting.exportedAt || Date.now();
     const files = snapshots.map((s, i) => ({ ...s, n: i + 1, file: NS.snapshotFile(i + 1, s.format) }));
     const out = [];
-    out.push(`# ${escapeMd(meeting.title || meeting.code || 'Google Meet')}`, '');
+    out.push(`# ${escapeMd(titleOf(meeting))}`, '');
     const meta = [`Google Meet`, NS.fmtLongDate(start), `${NS.fmtClock(start)}–${NS.fmtClock(end)} (${NS.fmtDuration(end - start)})`];
     if (meeting.code) meta.push(`code ${meeting.code}`);
     out.push(meta.join(' · '));
@@ -72,7 +81,7 @@
     const me = selfName(meeting, NS.settingsWithDefaults(settings));
     return JSON.stringify({
       meeting: { ...m, myName: me },
-      lines: lines.map((l) => ({ id: l.id, speaker: me ? NS.speakerAlias(l.speaker, me) : l.speaker, text: l.text, startedAt: l.startedAt, updatedAt: l.updatedAt })),
+      lines: [...lines].sort(byTime).map((l) => ({ id: String(l.id), speaker: me ? NS.speakerAlias(l.speaker, me) : l.speaker, text: l.text, startedAt: l.startedAt, updatedAt: l.updatedAt })),
       snapshots: snapshots.map((s, i) => ({ file: NS.snapshotFile(i + 1, s.format), takenAt: s.takenAt, reason: s.reason, source: s.source, width: s.width, height: s.height })),
       exportedAt: Date.now(),
       generator: 'Meet Capture for Claude',
@@ -88,5 +97,5 @@
     return files;
   }
 
-  Object.assign(NS, { buildMarkdown, buildJson, exportFiles, tidyLines, participants, withNames, selfName });
+  Object.assign(NS, { buildMarkdown, buildJson, exportFiles, tidyLines, participants, withNames, selfName, titleOf, byTime });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

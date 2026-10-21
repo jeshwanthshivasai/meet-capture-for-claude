@@ -85,7 +85,14 @@
   }
 
   // ------------------------------------------------------------------ stitching windows into one text
-  const MIN_ALIGN = 8; // characters two texts must share before we trust the alignment
+  // Alignment is done on words, ignoring case and punctuation: recognition keeps changing "Hi!" into
+  // "Hi, how?" into "Hi, how are you?", and the characters differ long before the words do.
+  const WORD_RE = /[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu;
+  function words(s) {
+    const out = [];
+    for (const m of String(s).matchAll(WORD_RE)) out.push({ w: m[0].toLowerCase(), start: m.index, end: m.index + m[0].length });
+    return out;
+  }
 
   function commonPrefix(a, b) {
     const n = Math.min(a.length, b.length);
@@ -96,37 +103,57 @@
 
   /**
    * full: everything we have for this block so far; win: the window of it Meet showed last time
-   * (always the tail of full); next: what Meet shows now. Returns the new { full, win, how }.
+   * (always the tail of full); next: what Meet shows now. Returns the new { full, win, how, added }:
+   * how is 'grow' (words were added), 'revise' (the tail was rewritten), 'scroll' (the start of the
+   * window left the screen), 'append' (nothing in common: the block started over), 'start', 'same' or
+   * 'ignored'; added is the text that is new at the end, when there is some.
    */
   function stitch(full, win, next) {
     full = full || ''; win = win || ''; next = normalize(next);
-    if (!next) return { full, win, how: 'ignored' };
-    if (!win) return { full: full ? full + ' ' + next : next, win: next, how: 'start' };
-    if (next === win) return { full, win, how: 'same' };
+    if (!next) return { full, win, how: 'ignored', added: '' };
+    if (!win) return { full: full ? full + ' ' + next : next, win: next, how: 'start', added: next };
+    if (next === win) return { full, win, how: 'same', added: '' };
     const head = full.slice(0, full.length - win.length);
-    // Where in the old window does the new one begin? Only word boundaries are candidates.
-    let best = { j: -1, len: 0 };
-    for (let j = 0; j < win.length; j++) {
-      if (j > 0 && win.charCodeAt(j - 1) !== 32) continue;
-      const len = commonPrefix(win.slice(j), next);
-      if (len > best.len) best = { j, len };
+    const W = words(win), N = words(next);
+    if (!N.length) return { full, win, how: 'ignored', added: '' };
+    if (!W.length) return { full: head + next, win: next, how: 'revise', added: '' };
+    // The new window starts at word j of the old one and k words match from there.
+    let best = null;
+    for (let j = 0; j < W.length; j++) {
+      let k = 0;
+      while (j + k < W.length && k < N.length && W[j + k].w === N[k].w) k++;
+      if (!k) continue;
+      const left = W.length - (j + k); // old words after the match that the new window no longer shows
+      const ok = j === 0
+        ? left <= Math.max(2, Math.floor(W.length / 2))   // same start: the tail was revised, or words were added
+        : left <= 2 && (k >= 2 || k === N.length);         // the start scrolled away: the overlap must reach the end
+      if (!ok) continue;
+      const score = k * 2 - left - (j > 0 ? 1 : 0);
+      if (!best || score > best.score) best = { j, k, left, score };
     }
-    const rest = best.j >= 0 ? win.length - best.j : 0;
-    const aligned = best.len > 0 && (best.len >= MIN_ALIGN || best.len >= rest || best.len >= next.length);
-    if (aligned) return { full: head + win.slice(0, best.j) + next, win: next, how: best.j === 0 ? 'revise' : 'scroll' };
-    // No overlap at all: Meet started this block over. Keep what we had and continue after it.
-    return { full: full + ' ' + next, win: next, how: 'append' };
+    if (!best) return { full: full + ' ' + next, win: next, how: 'append', added: next };
+    const keep = best.j === 0 ? '' : win.slice(0, W[best.j].start);
+    const tailIsNew = best.left === 0 && N.length > best.k;
+    const how = best.j > 0 ? 'scroll' : tailIsNew ? 'grow' : 'revise';
+    const added = tailIsNew ? next.slice(N[best.k - 1].end).trim() : '';
+    return { full: head + keep + next, win: next, how, added };
   }
 
   // ------------------------------------------------------------------ the transcript being built
+  const SPLIT_PAUSE_MS = 4000;  // no new words for this long: the next words start a new line
+  const SPLIT_LONG_MS = 40000;  // a line this old breaks at the next sentence end
+  const SENTENCE_END = /[.!?…]["'”’)\]]?$/;
+
   /**
    * Entries keyed by the caption block that produced them. When Meet re-renders its region the same
    * words come back in new blocks; bind() recognises them so they continue the entry instead of
-   * duplicating it.
+   * duplicating it. One block can run for minutes when one person keeps talking, so each entry is cut
+   * into segments at pauses and, for long runs, at sentence ends; lines() gives one line per segment.
    */
   function createTranscript(opts = {}) {
     const now = opts.now || (() => Date.now());
     const REBIND_MS = opts.rebindMs || 90000;
+    const pauseMs = opts.pauseMs || SPLIT_PAUSE_MS, longMs = opts.longMs || SPLIT_LONG_MS;
     const entries = [];
     const byKey = new Map();
     let seq = 0;
@@ -148,18 +175,57 @@
           return c;
         }
       }
-      e = { id: ++seq, key, speaker, full: '', win: '', startedAt: t, updatedAt: t, final: false };
+      e = { id: ++seq, key, speaker, full: '', win: '', startedAt: t, updatedAt: t, final: false, segs: [{ at: 0, startedAt: t, updatedAt: t }] };
       entries.push(e);
       byKey.set(key, e);
       return e;
     }
 
+    /** Move a cut forward to the next word boundary, so a revision before it can't leave it mid-word. */
+    function snap(full, at) {
+      if (at <= 0 || at >= full.length || full.charCodeAt(at - 1) === 32) return at;
+      const sp = full.indexOf(' ', at);
+      return sp < 0 ? full.length : sp + 1;
+    }
+
+    /**
+     * A revision before a cut changes the length of the text in front of it. Each cut remembers the
+     * first words of its segment and is put back in front of them; if those words were rewritten too,
+     * it stays where it was, moved to a word boundary.
+     */
+    function relocate(e) {
+      if (e.segs.length < 2) return;
+      const ws = words(e.full);
+      for (let i = 1; i < e.segs.length; i++) {
+        const s = e.segs[i];
+        let at = -1, bestD = Infinity;
+        for (let w = 0; s.anchor && w + s.anchor.length <= ws.length; w++) {
+          let ok = true;
+          for (let a = 0; a < s.anchor.length && ok; a++) ok = ws[w + a].w === s.anchor[a];
+          if (!ok) continue;
+          const d = Math.abs(ws[w].start - s.at);
+          if (d < bestD) { bestD = d; at = ws[w].start; }
+        }
+        s.at = Math.max(e.segs[i - 1].at, at >= 0 ? at : snap(e.full, s.at));
+      }
+    }
+
     function upsert(key, speaker, text) {
       const e = bind(key, speaker, text);
+      const t = now();
       const r = stitch(e.full, e.win, text);
       const changed = r.full !== e.full;
-      e.full = r.full; e.win = r.win;
-      if (changed) e.updatedAt = now();
+      if (changed) {
+        if (r.added && e.full) {
+          const last = e.segs[e.segs.length - 1];
+          const pause = t - e.updatedAt >= pauseMs;
+          const long = t - last.startedAt >= longMs && SENTENCE_END.test(e.full);
+          if (pause || long) e.segs.push({ at: r.full.length - r.added.length, startedAt: t, updatedAt: t, split: true, anchor: words(r.added).slice(0, 3).map((x) => x.w) });
+        }
+        e.full = r.full; e.win = r.win; e.updatedAt = t;
+        relocate(e);
+        e.segs[e.segs.length - 1].updatedAt = t;
+      }
       return { entry: e, changed, how: r.how };
     }
 
@@ -172,8 +238,20 @@
       return e;
     }
 
-    return { bind, upsert, release, all: () => entries, boundKeys: () => [...byKey.keys()] };
+    /** One line per segment of an entry: { id, speaker, text, startedAt, updatedAt, final, split }. */
+    function lines(e) {
+      const out = [];
+      for (let i = 0; i < e.segs.length; i++) {
+        const s = e.segs[i], end = i + 1 < e.segs.length ? e.segs[i + 1].at : e.full.length;
+        const text = e.full.slice(s.at, end).trim();
+        if (!text) continue;
+        out.push({ id: i ? `${e.id}.${i}` : String(e.id), speaker: e.speaker, text, startedAt: s.startedAt, updatedAt: s.updatedAt, final: e.final, split: !!s.split });
+      }
+      return out;
+    }
+
+    return { bind, upsert, release, lines, all: () => entries, allLines: () => entries.flatMap(lines), boundKeys: () => [...byKey.keys()] };
   }
 
-  Object.assign(NS, { CAPTION_LABEL_WORDS, REGION_SELECTOR, ITEM_SELECTOR, findRegion, looksLikeCaptions, isItem, items, readItem, stitch, commonPrefix, createTranscript });
+  Object.assign(NS, { CAPTION_LABEL_WORDS, REGION_SELECTOR, ITEM_SELECTOR, findRegion, looksLikeCaptions, isItem, items, readItem, stitch, words, commonPrefix, createTranscript });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

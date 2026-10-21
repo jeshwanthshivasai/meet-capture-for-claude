@@ -56,7 +56,7 @@
 
   // ------------------------------------------------------------------ rendering
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
-  const byTime = (a, b) => (a.startedAt - b.startedAt) || (a.id - b.id);
+  const byTime = (a, b) => (a.startedAt - b.startedAt) || String(a.id).localeCompare(String(b.id), undefined, { numeric: true });
   const meetingOf = (id) => state.meetings.find((x) => x.id === id) || {};
 
   function render() {
@@ -96,6 +96,7 @@
       <div class="feed" id="feed">${feedHtml(lines, m)}</div>
       <button type="button" class="primary big" data-action="snapshot" data-tab="${l.tabId}">📷 Snapshot the shared screen</button>
       <p class="fine" style="text-align:center">Also <span class="kbd">Alt</span>+<span class="kbd">Shift</span>+<span class="kbd">S</span> from the Meet tab, or the 📷 button on the page.</p>
+      ${st.selfPresenting && !(st.source && (st.source.presenting || st.source.likely)) && !state.display ? `<div class="notice"><b>You're presenting</b>, and Meet shows you no preview of your own share, so it can't be snapshotted from the page. <button type="button" class="link" data-action="my-share" data-meeting="${esc(l.meetingId)}">Capture your own screen share</button> from here instead.</div>` : ''}
       <div class="source" id="source" data-key="${esc(sourceKey(st))}">Source: ${src} <button type="button" class="link" data-action="change-source" data-tab="${l.tabId}">change</button></div>
       ${state.candidates ? pickerHtml(l) : ''}
       ${snaps.length ? `<div class="strip">${snaps.slice(-12).map((s) => `<img class="thumb" src="${s.thumb}" alt="Snapshot at ${C.fmtTime(s.takenAt)}" title="${C.fmtTime(s.takenAt)} · ${esc(s.reason)}">`).join('')}</div>` : ''}
@@ -181,6 +182,7 @@
     const cl = $('#chip-lines'); if (cl) cl.textContent = plural(lines.length, 'line');
     const cs = $('#chip-snaps'); if (cs) cs.textContent = plural((state.snaps.get(l.meetingId) || []).length, 'snapshot');
     const cc = $('#cc'); if (cc && cc.dataset.state !== ccState(st)) return render();
+    if (!!$('.notice') !== !!(st.selfPresenting && !(st.source && (st.source.presenting || st.source.likely)) && !state.display)) return render();
     const h1 = $('.live h1'); const m = meetingOf(l.meetingId); if (h1 && (m.title || st.title) && h1.textContent !== (m.title || st.title)) h1.textContent = m.title || st.title;
     const src = $('#source'); if (src && src.dataset.key !== sourceKey(st)) return render();
   }

@@ -84,9 +84,21 @@
     const el = document.querySelector('.u6vdEc');
     return (el && C.normalize(el.textContent)) || codeFromUrl();
   }
+  let nameHint = ''; // the name seen on the lobby page, where Meet still shows the account button
   function readMyName() {
     const el = document.querySelector('[data-self-name]');
-    return el ? C.normalize(el.getAttribute('data-self-name') || el.textContent).slice(0, 80) : '';
+    if (el) { const n = C.normalize(el.getAttribute('data-self-name') || el.textContent).slice(0, 80); if (n && !C.SELF_WORDS.test(n)) return n; }
+    // Google's account button: aria-label "Google Account: Name (email)".
+    const acct = document.querySelector('a[aria-label^="Google Account" i], [role="button"][aria-label^="Google Account" i]');
+    if (acct) { const m = /:\s*([^(\n]+?)\s*(?:\(|\n|$)/.exec(acct.getAttribute('aria-label') || ''); if (m) return C.normalize(m[1]).slice(0, 80); }
+    return nameHint;
+  }
+  /** Is the user sharing their own screen? Meet then shows a "Stop presenting" control. */
+  function isSelfPresenting() {
+    for (const b of document.querySelectorAll('button[aria-label], [role="button"][aria-label], [data-tooltip]')) {
+      if (/stop (presenting|sharing)/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-tooltip') || ''))) return true;
+    }
+    return false;
   }
   function meetingInfo() {
     const m = state.meeting;
@@ -203,12 +215,13 @@
   function flushLines(now) {
     if (state.flushTimer) { clearTimeout(state.flushTimer); state.flushTimer = null; }
     if (!state.meeting) { state.pending.clear(); return; }
-    const all = state.transcript ? state.transcript.all() : [];
-    state.lineCount = all.filter((e) => e.full).length;
-    state.lastLines = all.filter((e) => e.full).slice(-3).map((e) => ({ speaker: C.speakerAlias(e.speaker, settings.myName || state.meeting.myName), text: e.full.slice(-160) }));
-    const lines = now ? all.filter((e) => e.full) : [...state.pending.values()].filter((e) => e.full);
+    const tr = state.transcript;
+    const all = tr ? tr.allLines() : [];
+    state.lineCount = all.length;
+    state.lastLines = all.slice(-3).map((l) => ({ speaker: C.speakerAlias(l.speaker, settings.myName || state.meeting.myName), text: l.text.slice(-160) }));
+    const lines = now ? all : [...state.pending.values()].flatMap((e) => tr.lines(e));
     state.pending.clear();
-    if (lines.length) send({ type: 'lines', meetingId: state.meeting.id, lines: lines.map((e) => ({ id: e.id, speaker: e.speaker, text: e.full, startedAt: e.startedAt, updatedAt: e.updatedAt, final: e.final })) });
+    if (lines.length) send({ type: 'lines', meetingId: state.meeting.id, lines });
     renderPill();
   }
 
@@ -270,7 +283,7 @@
       statusTimer = null;
       if (!state.meeting) return send({ type: 'status', inCall: false });
       const s = state.source;
-      send({ type: 'status', inCall: true, meetingId: state.meeting.id, title: state.meeting.title, captionsOn: state.captionsOn, regionFound: !!state.region, strategy: state.strategy, lineCount: state.lineCount, snapshotCount: state.snapshotCount, lastLines: state.lastLines, chosenSource: state.chosenSource, source: s ? { id: s.id, label: s.label, width: s.width, height: s.height, presenting: s.presenting, likely: s.likely } : null, videos: state.candidates.length });
+      send({ type: 'status', inCall: true, meetingId: state.meeting.id, title: state.meeting.title, captionsOn: state.captionsOn, regionFound: !!state.region, strategy: state.strategy, lineCount: state.lineCount, snapshotCount: state.snapshotCount, lastLines: state.lastLines, chosenSource: state.chosenSource, selfPresenting: !!state.selfPresenting, source: s ? { id: s.id, label: s.label, width: s.width, height: s.height, presenting: s.presenting, likely: s.likely } : null, videos: state.candidates.length });
     }, 150);
   }
 
@@ -302,7 +315,8 @@
     ensurePill();
     if (!pill.isConnected) (document.body || document.documentElement).appendChild(pill);
     const cc = state.region ? '' : state.captionsOn === false ? ' · captions off' : ' · waiting for captions';
-    pillBody.textContent = `Capturing · ${state.lineCount} line${state.lineCount === 1 ? '' : 's'} · ${state.snapshotCount} snapshot${state.snapshotCount === 1 ? '' : 's'}${cc}`;
+    const share = state.selfPresenting && !(state.source && (state.source.presenting || state.source.likely)) ? ' · your share has no preview here: snapshot it from the panel' : '';
+    pillBody.textContent = `Capturing · ${state.lineCount} line${state.lineCount === 1 ? '' : 's'} · ${state.snapshotCount} snapshot${state.snapshotCount === 1 ? '' : 's'}${cc}${share}`;
     pillFlash.querySelector('.dot').classList.toggle('off', !state.region);
   }
   function flashPill() {
@@ -317,7 +331,9 @@
     const leave = findLeaveControl();
     if (leave) { state.missing = 0; if (!state.inCall) enterCall(); }
     else if (state.inCall && ++state.missing >= 3) leaveCall('left the call');
-    if (!state.inCall) return;
+    if (!state.inCall) { const n = readMyName(); if (n) nameHint = n; return; }
+    const presenting = isSelfPresenting();
+    if (presenting !== !!state.selfPresenting) { state.selfPresenting = presenting; renderPill(); }
     checkCaptions();
     checkRegion();
     const title = readTitle();

@@ -44,12 +44,12 @@
     },
     async putLines(meetingId, lines) {
       const db = await open(); const t = db.transaction('lines', 'readwrite'); const s = t.objectStore('lines');
-      for (const l of lines) s.put({ key: lineKey(meetingId, l.id), meetingId, id: l.id, speaker: l.speaker, text: l.text, startedAt: l.startedAt, updatedAt: l.updatedAt, final: !!l.final });
+      for (const l of lines) s.put({ key: lineKey(meetingId, l.id), meetingId, id: String(l.id), speaker: l.speaker, text: l.text, startedAt: l.startedAt, updatedAt: l.updatedAt, final: !!l.final, split: !!l.split });
       await done(t);
     },
     async getLines(meetingId) {
       const db = await open(); const all = await req(db.transaction('lines').objectStore('lines').index('meetingId').getAll(meetingId));
-      all.sort((a, b) => (a.startedAt - b.startedAt) || (a.id - b.id));
+      all.sort((a, b) => (a.startedAt - b.startedAt) || String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
       return all;
     },
     async countLines(meetingId) { const db = await open(); return req(db.transaction('lines').objectStore('lines').index('meetingId').count(meetingId)); },

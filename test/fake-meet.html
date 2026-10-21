@@ -138,6 +138,15 @@
     [9900, 'set', 3, 'Great, moving on to the agenda for today'],
     [11000, 'new', 4, 'Sam Okafor', 'Can you zoom in on the second rule?'],
     [12500, 'new', 5, 'You', 'Sure, one second'],
+    // One block that keeps going, as in a real call: short revisions that differ only in punctuation,
+    // a pause, then the window scrolling. It should come out as two lines, "Hi, how are you?" once.
+    [13000, 'new', 6, 'You', 'Hi!'],
+    [13400, 'set', 6, 'Hi, how?'],
+    [13800, 'set', 6, 'Hi, how are you?'],
+    [19200, 'set', 6, 'Hi, how are you? So I have been looking into these things'],
+    [19800, 'set', 6, 'Hi, how are you? So I have been looking into these things lately over the weekend'],
+    [20400, 'set', 6, 'So I have been looking into these things lately over the weekend and I think we can connect'],
+    [21000, 'done'],
   ];
   let started = false;
   function startCaptions() {
@@ -146,6 +155,7 @@
   }
   function apply([, kind, id, a, b]) {
     const region = document.getElementById('region'); if (!region) return;
+    if (kind === 'done') { window.__fake.done = true; return; }
     if (kind === 'new') return block(id, a, b);
     if (kind === 'set') { const x = blocks.get(id); if (x) { x.text = a; x.el.querySelector('.ygicle').textContent = a; } return; }
     if (kind === 'remove') { const x = blocks.get(id); if (x) { x.el.remove(); blocks.delete(id); } return; }

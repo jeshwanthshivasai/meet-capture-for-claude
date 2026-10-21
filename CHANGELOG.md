@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.1 (2026-10-21)
+
+Fixes from the first real call.
+
+- **No more "Hi! Hi, how? Hi, how are you?"** Captions are now aligned on words, ignoring punctuation and case, so a short line that recognition keeps rewriting is replaced instead of repeated.
+- **Long runs become lines.** Meet keeps one caption block for as long as one person talks, which made a three-minute monologue one line with one timestamp. A block is now cut into lines at pauses of four seconds or more and, for runs past forty seconds, at the next sentence end. Snapshot markers can then sit between the right lines.
+- **Your name.** When Meet's own tile doesn't carry your name, it is read from the Google account button (on the lobby page), so "You" gets replaced even without the setting.
+- **Presenting yourself.** Meet shows no preview of your own share, so nothing could be snapshotted. The pill and the panel now say so and point to **Capture your own screen share**.
+- An unnamed call is titled "Google Meet <code>" in the transcript instead of the bare code.
+
 ## 1.0.0 (2026-10-21)
 
 First release.

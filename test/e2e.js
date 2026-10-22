@@ -61,6 +61,21 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   await page.waitForSelector(`${PANEL}.open`, { timeout: 3000 });
   console.log('panel closes for Meet\'s chat and reopens from the bar button');
 
+  // 2b. Presenting yourself: the panel offers to capture your share. Chrome's picker is auto-selected in this run;
+  //     headless screens can be blank, so only the offer and the capture itself are required to work.
+  await page.click('#present');
+  await page.waitForSelector(`${PANEL} [data-act="share"]`, { timeout: 5000 });
+  console.log('presenting: the panel offers Capture my share');
+  await page.click(`${PANEL} [data-act="share"]`);
+  const shared = await page.waitForFunction(panelFn("return /Capturing your screen share/.test(panel.querySelector('[data-el=\"callout\"]').textContent);"), null, { timeout: 8000 }).then(() => true).catch(() => false);
+  if (shared) {
+    const t0 = Date.now(); let srcs = [];
+    while (Date.now() - t0 < 8000 && !srcs.includes('Your screen share')) { await sleep(500); srcs = await sw.evaluate(async () => { const m = (await MCC.store.listMeetings())[0]; return (await MCC.store.getSnapshots(m.id)).map((x) => x.source); }); }
+    console.log('share captured; snapshot sources so far:', [...new Set(srcs)].join(' | ') || '(none)', srcs.includes('Your screen share') ? '' : '(no frame of the share yet: a blank headless screen gives none)');
+  } else console.log('getDisplayMedia did not start in this headless run; share capture skipped');
+  await page.click('#present');
+  await page.waitForFunction(panelFn("return !/Capturing your screen share/.test(panel.querySelector('[data-el=\"callout\"]').textContent) || panel.querySelector('[data-el=\"callout\"]').hidden;"), null, { timeout: 5000 });
+
   // 3. Leave the call: the captures page opens by itself on this meeting; a card stays on Meet's "You left" page.
   await page.waitForFunction(() => window.__fake && window.__fake.done, null, { timeout: 30000 }); // the caption timeline is over
   await sleep(1500);

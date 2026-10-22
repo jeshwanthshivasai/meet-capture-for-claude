@@ -1,4 +1,4 @@
-# Chrome Web Store submission kit (2.0.x)
+# Chrome Web Store submission kit (0.3.x)
 
 Everything the dashboard asks for, ready to paste.
 
@@ -14,7 +14,7 @@ The icons are built by `node store/make-icons.js`; everything else by `node stor
 
 ## Before you submit
 
-1. **Try it in a real call.** The caption reader was verified in a live call (1.0.1); the capture button's place in Meet's bar and the docked panel were built against Meet's layout as documented in October 2026 and checked against a replica of it. Join a Meet with a second account or a colleague: the button should sit next to Chat and the panel should open on the right. Turn on captions, share a screen, leave, and check that the captures page opens. If the panel says "waiting for captions" with captions on, the selectors in `src/captions.js` need updating before anything else; if there is no button, the bar lookup in `src/ui.js` (it looks for Meet's Chat, People, Activities and Meeting details buttons by label) does.
+1. **Try it in a real call.** The caption reader was verified in a live call (0.2.0); the capture button's place in Meet's bar and the docked panel were built against Meet's layout as documented in October 2026 and checked against a replica of it. Join a Meet with a second account or a colleague: the button should sit next to Chat and the panel should open on the right. Turn on captions, share a screen, leave, and check that the captures page opens. If the panel says "waiting for captions" with captions on, the selectors in `src/captions.js` need updating before anything else; if there is no button, the bar lookup in `src/ui.js` (it looks for Meet's Chat, People, Activities and Meeting details buttons by label) does.
 2. **Check Open in Claude.** It opens `https://claude.ai/new?q=<transcript>`. If Claude no longer prefills the message box from `q`, turn the setting off by default or remove the button; the Copy transcript button covers the same need.
 3. Read the privacy policy once more against what the code does, since the store reads it too.
 
@@ -44,7 +44,7 @@ A capture button sits in Meet's own bar. While you're in a call, the live captio
 INSIDE MEET
 • A panel like Meet's own People and Chat panels: the live transcript with names and times, snapshot cards as they are taken, a Snapshot button, and which video is being snapshotted.
 • Captions are switched on by themselves when a call starts, because there's no transcript without them.
-• Presenting yourself? Meet shows no preview of your share. One click, and your share is snapshotted as it changes, like anyone else's.
+• Presenting yourself? One click, and your share is snapshotted as it changes, whatever app or tab you switch to, even while the Meet tab is in the background. Alt+Shift+S takes one from any app.
 
 AFTER THE CALL
 • Your captures page opens on the meeting: who spoke, the snapshots, the transcript with the snapshots in place.

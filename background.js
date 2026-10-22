@@ -18,7 +18,7 @@ const APP_URL = chrome.runtime.getURL('app/index.html');
 
 chrome.runtime.onInstalled.addListener(async (d) => {
   if (d.reason === 'install') await chrome.storage.local.set({ settings: C.DEFAULT_SETTINGS }).catch(() => {});
-  else if (d.reason === 'update') { // settings from 1.x: keep what still exists, map the old export switch
+  else if (d.reason === 'update') { // settings from earlier builds: keep what still exists, map the old export switch
     const { settings: old } = await chrome.storage.local.get('settings').catch(() => ({}));
     if (old && typeof old === 'object') {
       const next = C.settingsWithDefaults(old);

@@ -121,6 +121,12 @@
       if (on) startCaptions();
     };
     document.getElementById('leave').onclick = left;
+    const present = document.getElementById('present');
+    present.onclick = () => { // Meet shows a "Stop presenting" control and no preview of your own share
+      const on = present.getAttribute('aria-label') !== 'Stop presenting';
+      present.setAttribute('aria-label', on ? 'Stop presenting' : 'Present now');
+      present.setAttribute('aria-pressed', String(on));
+    };
   }
 
   // The caption timeline: blocks grow, get revised, scroll at the front, get removed, and the whole

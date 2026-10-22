@@ -303,11 +303,11 @@
       const badge = bsh && bsh.querySelector('.badge'); if (badge) badge.classList.toggle('on', !!st.regionFound);
       // Presenting yourself: Meet shows no preview of your own share.
       const c = els.callout;
-      if (st.selfPresenting && !st.shareActive && !(src && (src.presenting || src.likely))) {
-        if (c.dataset.kind !== 'share') { c.dataset.kind = 'share'; c.className = 'callout'; c.innerHTML = `You're presenting. Meet shows no preview of your own share here, so pick it once and snapshots continue by themselves.<br><button class="btn" data-act="share">${CAMERA}Capture my share</button>`; }
+      if (st.selfPresenting && !st.shareActive) {
+        if (c.dataset.kind !== 'share') { c.dataset.kind = 'share'; c.className = 'callout'; c.innerHTML = `You're presenting. Meet's own preview of your share stops updating once you switch to another window, so pick your share here once and snapshots of it continue by themselves, whatever is on your screen.<br><button class="btn" data-act="share">${CAMERA}Capture my share</button>`; }
         c.hidden = false;
       } else if (st.shareActive) {
-        if (c.dataset.kind !== 'sharing') { c.dataset.kind = 'sharing'; c.className = 'callout ok'; c.textContent = 'Capturing your screen share. Snapshots are taken as it changes.'; }
+        if (c.dataset.kind !== 'sharing') { c.dataset.kind = 'sharing'; c.className = 'callout ok'; c.textContent = 'Capturing your screen share: snapshots are taken as it changes, even while this tab is in the background. Alt+Shift+S takes one from any app.'; }
         c.hidden = false;
       } else { c.hidden = true; c.dataset.kind = ''; }
       renderFeed(st);

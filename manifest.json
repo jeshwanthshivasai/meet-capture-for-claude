@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Meet Capture for Claude",
   "short_name": "Meet Capture",
-  "version": "2.0.0",
+  "version": "0.3.0",
   "description": "Unofficial. Saves Google Meet captions and screen snapshots into a Claude-ready transcript, inside Meet, on your computer.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -50,7 +50,8 @@
       "suggested_key": {
         "default": "Alt+Shift+S"
       },
-      "description": "Take a snapshot of the shared screen"
+      "description": "Take a snapshot of the shared screen",
+      "global": true
     }
   }
 }

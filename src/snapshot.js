@@ -139,9 +139,9 @@
     return out;
   }
 
-  /** A full-size image of one frame plus a small preview, as data URLs. */
+  /** A full-size image of one frame plus a small preview, as data URLs. The source is a <video> or an ImageBitmap. */
   function capture(video, { maxWidth = 1600, format = 'png', quality = 0.9, doc } = {}) {
-    const w0 = video.videoWidth, h0 = video.videoHeight;
+    const w0 = video.videoWidth || video.width, h0 = video.videoHeight || video.height;
     const scale = Math.min(1, maxWidth / Math.max(w0, h0));
     const w = Math.max(1, Math.round(w0 * scale)), h = Math.max(1, Math.round(h0 * scale));
     const c = doc.createElement('canvas'); c.width = w; c.height = h;

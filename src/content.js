@@ -247,26 +247,43 @@
     if (state.chosenSource !== 'auto') return cands.find((c) => c.id === state.chosenSource) || null;
     return cands.find((c) => c.likely && !c.self) || null;
   }
+  let sampling = false;
   function sampleSnapshots() {
-    if (!state.inCall) return;
+    if (!state.inCall || sampling) return;
+    sampling = true;
+    sampleOnce().catch((e) => LOG('sampling failed', e)).finally(() => { sampling = false; });
+  }
+  async function sampleOnce() {
     const pick = pickSource();
     const changedSource = (pick && pick.id) !== (state.source && state.source.id);
     state.source = pick;
     if (changedSource) { sendStatus(); renderUI(); }
     if (!pick || settings.snapshotMode === 'manual') return;
-    let sig;
-    try { sig = C.signatureOf(pick.video, sigCanvas); } catch (e) { return; }
-    const reason = detector.sample(sig, pick.id);
-    if (!reason) return;
-    const mode = settings.snapshotMode;
-    if (reason === 'timer' && mode === 'change') return;
-    if ((reason === 'screen changed' || reason === 'new source') && mode === 'timer') return;
-    takeSnapshot(pick, reason, sig);
+    const src = await frameOf(pick);
+    if (!src) return;
+    try {
+      let sig;
+      try { sig = C.signatureOf(src, sigCanvas); } catch (e) { return; }
+      const reason = detector.sample(sig, pick.id);
+      if (!reason) return;
+      const mode = settings.snapshotMode;
+      if (reason === 'timer' && mode === 'change') return;
+      if ((reason === 'screen changed' || reason === 'new source') && mode === 'timer') return;
+      takeSnapshot(pick, reason, sig, src);
+    } finally { release(src); }
   }
-  function takeSnapshot(pick, reason, sig) {
+  /** The picture to read: the video on the page, or for your own share a frame straight from the track. */
+  async function frameOf(pick) {
+    if (pick.id === 'share' && state.share && state.share.grab) {
+      try { return await state.share.grab.grabFrame(); } catch (e) { /* the video element will do */ }
+    }
+    return pick.video;
+  }
+  const release = (src) => { if (src && typeof src.close === 'function') src.close(); };
+  function takeSnapshot(pick, reason, sig, src) {
     let shot;
-    try { shot = C.capture(pick.video, { maxWidth: settings.snapshotMaxWidth, format: settings.snapshotFormat, quality: 0.9, doc: document }); } catch (e) { LOG('snapshot failed', e); return false; }
-    try { detector.saved(sig || C.signatureOf(pick.video, sigCanvas)); } catch (e) { /* fine */ }
+    try { shot = C.capture(src || pick.video, { maxWidth: settings.snapshotMaxWidth, format: settings.snapshotFormat, quality: 0.9, doc: document }); } catch (e) { LOG('snapshot failed', e); return false; }
+    try { detector.saved(sig || C.signatureOf(src || pick.video, sigCanvas)); } catch (e) { /* fine */ }
     state.snapshotCount++;
     const takenAt = Date.now();
     const source = pick.label || (pick.presenting ? 'Presentation' : 'Shared screen');
@@ -277,11 +294,14 @@
     renderUI();
     return true;
   }
-  function snapshotNow(reason) {
+  async function snapshotNow(reason) {
     if (!state.inCall) return send({ type: 'toast', text: 'Not in a call.' });
     const pick = pickSource() || state.candidates[0];
     if (!pick) return send({ type: 'toast', text: 'No video to snapshot. Is someone sharing a screen?' });
-    if (!takeSnapshot(pick, reason)) send({ type: 'toast', text: 'That snapshot did not work.' });
+    const src = await frameOf(pick);
+    const ok = takeSnapshot(pick, reason, undefined, src);
+    release(src);
+    if (!ok) send({ type: 'toast', text: 'That snapshot did not work.' });
   }
   function sendCandidates() {
     const cands = C.candidates(document, window);
@@ -295,7 +315,11 @@
     send({ type: 'candidates', meetingId: state.meeting && state.meeting.id, chosen: state.chosenSource, candidates: list });
   }
 
-  /** Your own share has no preview in Meet; Chrome's picker gives us the same picture to watch. */
+  /**
+   * Your own share: Meet shows no preview of it, or a preview that stops updating once this tab is in the
+   * background (which is exactly when you are showing other windows). Chrome's picker gives us our own
+   * stream of the same screen, and frames are read straight from its track, so they stay current.
+   */
   async function captureShare() {
     if (!state.inCall || state.share) return;
     let stream;
@@ -305,13 +329,16 @@
     const video = document.createElement('video');
     video.muted = true; video.playsInline = true; video.srcObject = stream;
     try { await video.play(); } catch (e) { /* autoplay rules do not apply to muted video */ }
-    const candidate = { video, id: 'share', width: video.videoWidth, height: video.videoHeight, area: 1e9, label: 'Your screen share', presenting: true, self: false, mirrored: false, likely: true };
-    state.share = { stream, video, candidate };
     const [track] = stream.getVideoTracks();
+    const st = track ? track.getSettings() : {};
+    const candidate = { video, id: 'share', width: st.width || video.videoWidth, height: st.height || video.videoHeight, area: 1e9, label: 'Your screen share', presenting: true, self: false, mirrored: false, likely: true };
+    let grab = null;
+    try { if (track && typeof ImageCapture === 'function') grab = new ImageCapture(track); } catch (e) { grab = null; }
+    state.share = { stream, video, candidate, grab };
     if (track) track.addEventListener('ended', stopShare);
     detector.reset();
     sendStatus(); renderUI();
-    setTimeout(() => { candidate.width = video.videoWidth; candidate.height = video.videoHeight; sampleSnapshots(); }, 600);
+    setTimeout(() => { candidate.width = candidate.width || video.videoWidth; candidate.height = candidate.height || video.videoHeight; sampleSnapshots(); }, 600);
   }
   function stopShare() {
     if (!state.share) return;

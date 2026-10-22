@@ -47,8 +47,8 @@ INSIDE MEET
 • Presenting yourself? One click, and your share is snapshotted as it changes, whatever app or tab you switch to, even while the Meet tab is in the background. Alt+Shift+S takes one from any app.
 
 AFTER THE CALL
-• Your captures page opens on the meeting: who spoke, the snapshots, the transcript with the snapshots in place.
-• Open in Claude, Copy transcript, Download ZIP (one file), Save to folder (pick it once, then one click or none).
+• Your captures page opens on the meeting, set like the minutes: who spoke, the meeting as one line with a mark at each snapshot, the transcript with the snapshots in place.
+• Open in Claude, Copy transcript, Save ZIP (one file), Save to folder (pick it once, then one click or none).
 • A lightbox with Copy image for pasting a snapshot into a chat. Rename, search, delete. Meetings are kept for 30 days.
 • A "Meeting captured" card on Meet's "You left" page with the counts and the same two buttons.
 
@@ -83,7 +83,7 @@ Save the live captions and screen-share snapshots of the Google Meet calls the u
 The content script runs only on meet.google.com. While the user is in a call it reads the captions Meet displays (speaker and text) and the video of the shared screen, to build the transcript and take snapshots. It clicks Meet's captions button when captions are off, because the transcript is built from them, and adds the extension's capture button and panel to the page (in shadow roots, so nothing of Meet's is changed). It makes no requests to any site.
 
 **Permission justification, downloads:**
-Writes one ZIP (the transcript and the snapshot images) into Downloads/Meet captures when the user clicks Download ZIP or chose that for the end of a call, and a single snapshot image when asked for one. The extension only creates downloads; it never reads, opens or removes them. Saving into a folder of the user's choice uses the File System Access API and its own picker, which needs no permission.
+Writes one ZIP (the transcript and the snapshot images) into Downloads/Meet captures when the user clicks Save ZIP or chose that for the end of a call, and a single snapshot image when asked for one. The extension only creates downloads; it never reads, opens or removes them. Saving into a folder of the user's choice uses the File System Access API and its own picker, which needs no permission.
 
 **Permission justification, storage and unlimitedStorage:**
 Captured meetings (captions and snapshot images) are stored in the extension's IndexedDB as they arrive, so a closed tab loses nothing, and kept for the number of days the user sets. Snapshots are images, which is why the default quota isn't enough. Settings are kept in chrome.storage.local.

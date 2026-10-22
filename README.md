@@ -10,7 +10,7 @@ This tool is unofficial. It is not made by or affiliated with Google or Anthropi
   <img src="docs/meet.png" alt="A Google Meet call with the Meet Capture panel docked on the right: the live captions with names and times, snapshot cards in the feed, the Snapshot button and the automatic mode" width="760">
 </p>
 <p>
-  <img src="docs/app.png" alt="The captures page after the call: the meeting's title, who spoke, the Open in Claude, Copy transcript, Download ZIP and Save to folder buttons, the snapshots and the transcript" width="760">
+  <img src="docs/app.png" alt="The captures page after the call: the meeting's title, who spoke, the meeting as a line with a mark at each snapshot, the Open in Claude button with Copy transcript, Save ZIP and Save to folder beside it, and the transcript with the snapshots in place" width="760">
 </p>
 
 [What you get](#what-you-get) · [Install](#install) · [Privacy](#privacy-and-security) · [Privacy policy](PRIVACY.md) · [Changelog](CHANGELOG.md)
@@ -19,13 +19,13 @@ This tool is unofficial. It is not made by or affiliated with Google or Anthropi
 
 1. **Join a Google Meet call.** The capture button joins Meet's bottom bar, next to Chat, and its panel opens on the right like Meet's People and Chat panels. Captions are switched on (the CC button) if they're off, because the transcript is built from them.
 2. **Talk, share, present.** Every caption lands in the panel as a line with the speaker's name and the time. When someone shares a screen, a snapshot is taken the moment it changes and once more when it has settled; snapshot cards appear in the feed between the lines. Press **Snapshot** in the panel or **Alt+Shift+S** (from any app) for one right now. If you're the one presenting, click **Capture my share** in the panel: Chrome asks once which window or screen to watch, and from then on your share is snapshotted as it changes, whatever you switch to. Meet's own preview of your share stops updating once its tab is in the background, which is why this step exists.
-3. **Leave.** Your captures page opens on the meeting, and a small card on Meet's "You left" page offers the same. On the page: the transcript with the snapshots in place, **Open in Claude** (a new claude.ai chat with the transcript already in the message box), **Copy transcript**, **Download ZIP** (one file in Downloads/Meet captures), and **Save to folder** (pick a folder once; after that every meeting can be written there without a question).
+3. **Leave.** Your captures page opens on the meeting, and a small card on Meet's "You left" page offers the same. The page reads like the minutes of the meeting: the title, the date and who spoke, the meeting as one line (shaded where captions flowed, a mark at each snapshot; hover it to see the slide at that moment, click to go there), then what people said with the snapshots in place where they were taken. One strong action, **Open in Claude** (a new claude.ai chat with the transcript already in the message box), and beside it **Copy transcript**, **Save ZIP** (one file in Downloads/Meet captures) and **Save to folder** (pick a folder once; after that every meeting can be written there without a question).
 
 Tell the people in the call that you're saving the captions, the same way you would say that you're recording.
 
 ## What you get
 
-Your captures page keeps every meeting for 30 days (change it in the settings). Each meeting has its transcript, its snapshots, a lightbox with **Copy image** for pasting a snapshot into a chat, and a rename. A ZIP or a folder save gives you:
+Your captures page keeps every meeting for 30 days (change it in the settings), listed by day, each with its small line showing how long it was and where the slides changed. Each meeting has its transcript, its snapshots, a lightbox with **Copy image** for pasting a snapshot into a chat, a rename, and a delete you can undo. A ZIP or a folder save gives you:
 
 ```
 2026-10-22 14.30 Weekly design sync/
@@ -64,6 +64,7 @@ There is no server and no account. The extension runs only on `meet.google.com` 
 - **The UI in Meet.** The bar button and the panel live in shadow roots, so Meet's styles don't reach them and theirs don't reach Meet. The button copies the size and shape of Meet's own buttons; the panel steps aside when you open Meet's chat or people list, as Meet's own panels do.
 - **Storage.** Lines and snapshots go to the extension's own IndexedDB as they arrive, so a crashed tab or a closed laptop loses at most a few seconds.
 - **After the call.** The service worker opens the captures page on the meeting (or saves a ZIP, or both, or nothing: your choice). The page reads the meeting from IndexedDB; **Save to folder** writes files with the File System Access API into the folder you picked, which needs no extra permission and no download prompts.
+- **The look of the page.** One column, set like a document: the words people said in Newsreader, the interface in Geist, colours from the Radix scales, the mint of the icon for the one action. Both typefaces ship inside the extension under the SIL Open Font License; nothing is fetched. The choices are written down in [docs/DESIGN.md](docs/DESIGN.md).
 
 | File | What it does |
 |---|---|

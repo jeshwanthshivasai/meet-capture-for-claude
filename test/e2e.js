@@ -92,14 +92,30 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   if (!/Meeting captured/.test(cardText)) errors.push('no "Meeting captured" card after the call');
   await page.screenshot({ path: path.join(OUT, '2-meet-left-card.png') });
   await app.bringToFront();
-  await app.waitForSelector('.tl .entry', { timeout: 15000 });
+  await app.waitForSelector('.tl .line', { timeout: 15000 });
   await app.waitForFunction(() => !document.querySelector('.meta .live'), null, { timeout: 15000 });
-  await app.waitForSelector('.strip .thumb', { timeout: 5000 });
+  await app.waitForSelector('.figure img', { timeout: 5000 });
+  await app.waitForSelector('.strip .tick', { timeout: 5000 });
   await sleep(400);
   await app.screenshot({ path: path.join(OUT, '3-app-meeting.png'), fullPage: true });
-  const n = await app.$$eval('.tl .entry .text', (els) => els.length);
-  const thumbs = await app.$$eval('.strip .thumb', (els) => els.length);
-  console.log('captures page shows', n, 'lines and', thumbs, 'snapshots');
+  const n = await app.$$eval('.tl .line .text', (els) => els.length);
+  const thumbs = await app.$$eval('.figure', (els) => els.length);
+  const ticks = await app.$$eval('.strip .tick', (els) => els.length);
+  console.log('captures page shows', n, 'lines and', thumbs, 'snapshots;', ticks, 'marks on the line');
+  if (ticks !== thumbs) errors.push(`the meeting line has ${ticks} marks for ${thumbs} snapshots`);
+  // The line: hovering near a mark names the snapshot and shows it; clicking goes to it in the record.
+  const tick = await app.$('.strip .tick');
+  await tick.scrollIntoViewIfNeeded();
+  const box = await tick.boundingBox();
+  await app.mouse.move(10, 400);
+  await app.mouse.move(box.x + 1, box.y + 8, { steps: 6 });
+  await app.waitForFunction(() => /^Snapshot 1 · /.test(document.querySelector('.strip [data-el="readout"]').textContent), null, { timeout: 3000 });
+  const tipShown = await app.$eval('.strip [data-el="tip"]', (el) => !el.hidden && /^data:image/.test(el.querySelector('img').src));
+  if (!tipShown) errors.push('hovering a mark on the line does not show the snapshot');
+  await app.mouse.click(box.x + 1, box.y + 8);
+  await app.waitForFunction(() => document.querySelector('#snap-1').classList.contains('hit'), null, { timeout: 3000 });
+  console.log('the meeting line names and previews the snapshot on hover, and jumps to it on click');
+  await app.mouse.move(10, 10);
 
   // 4. Copy the transcript and check it.
   await app.evaluate(() => { window.__copied = ''; navigator.clipboard.writeText = async (t) => { window.__copied = t; }; });
@@ -182,7 +198,7 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   if (folderBtn !== 'Save to Meet captures') errors.push('the folder button does not show the chosen folder: ' + folderBtn);
 
   // 8. The lightbox and a rename.
-  await app.click('.strip .thumb');
+  await app.click('.figure img');
   await app.waitForSelector('#lightbox[open] img', { timeout: 3000 });
   await app.waitForFunction(() => /^blob:/.test(document.querySelector('#lightbox img').src), null, { timeout: 5000 });
   await app.screenshot({ path: path.join(OUT, '5-app-lightbox.png') });
@@ -194,9 +210,14 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   await sleep(500);
   const renamed = await sw.evaluate(async () => (await MCC.store.listMeetings())[0].title);
   if (renamed !== 'Design sync · renamed') errors.push('the rename was not stored: ' + renamed);
-  const listTitle = await app.$eval('.list .item.active .t span', (el) => el.textContent);
-  if (listTitle !== 'Design sync · renamed') errors.push('the list does not show the new title: ' + listTitle);
-  console.log('renamed to:', renamed);
+  await app.click('#crumb');
+  await app.waitForSelector('#index .row', { timeout: 3000 });
+  const listTitle = await app.$eval('#index .row .rt', (el) => el.textContent);
+  if (listTitle !== 'Design sync · renamed') errors.push('the index does not show the new title: ' + listTitle);
+  const miniTicks = await app.$$eval('#index .row .mini i', (els) => els.length);
+  if (!miniTicks) errors.push('the index row has no marks on its line');
+  await app.screenshot({ path: path.join(OUT, '7-app-index.png') });
+  console.log('renamed to:', renamed, '· index row shows', miniTicks, 'marks');
 
   // 9. A reload mid-call continues the same meeting instead of starting a second one; the page follows the live call.
   await page.bringToFront();
@@ -213,10 +234,11 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   if (afterReload.length !== n1) errors.push('a reload mid-call started a new meeting record');
   if (afterReload.filter((m) => m.status === 'live').length !== 1) errors.push('expected exactly one live meeting after the reload');
   await app.bringToFront();
-  await app.waitForSelector('.list .live-dot', { timeout: 5000 });
-  await app.click('.list .item:has(.live-dot)');
+  await app.waitForSelector('#index .row .live-dot', { timeout: 8000 });
+  await app.click('#index .row:has(.live-dot)');
   await app.waitForSelector('.meta .live', { timeout: 5000 });
-  await app.waitForFunction(() => document.querySelectorAll('.tl .entry').length >= 1, null, { timeout: 25000 });
+  await app.waitForFunction(() => document.querySelectorAll('.tl .line').length >= 1, null, { timeout: 25000 });
+  await app.waitForSelector('.strip .now', { timeout: 5000 });
   await app.screenshot({ path: path.join(OUT, '6-app-live.png') });
   console.log('the captures page follows the live call');
   await page.click('#leave');

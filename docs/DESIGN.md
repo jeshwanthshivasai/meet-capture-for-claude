@@ -1,0 +1,43 @@
+# The captures page: design notes
+
+Written before the page was drawn, the way a designer would, so the choices can be checked against them.
+
+## The moment
+
+Jesh has just hung up a design sync at 11:31. The next call is at 11:45. The decisions were made out loud and three slides were shown; Jesh wants Claude to write the summary and the action items, with the slides, before the next call starts, and does not want to re-read what was said ten minutes ago. "Done" is: the transcript is in a Claude chat and the snapshots are with it, and nothing was lost. Days later there is a second moment: "what did Priya say about the launch date, and what was on screen?"
+
+## The decisions, and who makes them
+
+| Decision | Who |
+|---|---|
+| Which meeting? | The system: the page opens on the call that just ended. |
+| Did it capture everything? | The system shows it: the meeting as one line, shaded where captions flowed, with a mark at each snapshot; a gap says "6 min without captions" in words. |
+| What is this meeting called? | The system, from Meet's title. Rename on request. |
+| Who is "You"? | The system, from the Google account. If that failed, one line asks for the name, once. |
+| What to do with it? | The person: one strong action, **Open in Claude**. Copy, ZIP and folder are quiet beside it. |
+| Which snapshots to keep? | Nobody: all of them are kept, duplicates were never taken. |
+
+Common case: one decision and one click. The obvious version (open the page, scan, copy, open Claude, paste, download the ZIP, unzip, drag the images) was six or more.
+
+## Centre, periphery, on request, nowhere
+
+- **Centre:** the meeting that just ended: its name, the one action, and the record itself: what people said, with the snapshots in place where they were taken.
+- **Periphery:** the date, the times, how long; who spoke; the meeting as one line; "Live" while it is live.
+- **On request:** the time of each line (shown for the first line of a turn, the rest on hover); why a snapshot was taken and what was being shared (in its caption); the exact size (in the lightbox); the Meet link, rename, delete (in the menu); settings.
+- **Nowhere:** initials avatars; per-speaker colours; name chips; counts repeated in three places; a section header that says "Transcript" above the transcript; a permanent list of every meeting beside the one you are reading; three export buttons of the same weight; a confirmation before a delete (there is Undo instead).
+
+What leaves the building stays in view: under the actions, one plain line says that Open in Claude starts a claude.ai chat with the transcript in the message box, and that nothing else is sent anywhere. The risky exception stays in view too: lines Meet labelled "You" are flagged in words, once, with the way to fix it.
+
+## Voice and look
+
+1. **Feeling:** kept, ready, light.
+2. **Source:** the minute after a good meeting: the notes are written, the photo of the whiteboard is taken, the laptop closes. The page reads as the minutes of the meeting, not as a dashboard about it. Colour comes from the extension's own mark: slate and mint.
+3. **Type:** two registers. The words people said are set in Newsreader, a text face made for reading on screens, at 17 px with generous leading; the meeting's name in the same face, large. Everything that is tool rather than record is in Geist: names, times, buttons, captions, settings. Figures are tabular so times line up in the margin.
+4. **Colour:** Radix Colors scales. Sand for the neutrals, warm and quiet in light and dark. Jade, the mint of the icon, for one job: the one action and the one line that shows what was captured. Amber only for the one thing that needs you. Red only for delete.
+5. **The one element, and the warm moment.** The meeting as a single line: its length, shaded where captions flowed, a mark at each snapshot, "now" moving along it while the call is live. Hover it to see the slide at that moment, click to go there. Each meeting in the index carries a small one, so the list shows length and slides without a number. The warm moment is the first run: one paragraph that says where the button is and that the meeting will be here when you leave, and one link to open Meet.
+
+## Review
+
+Walked as Jesh at 11:32: open page, read the title, press Open in Claude: one decision. Elements on screen not needed in that moment: the index link, the settings button, the three quiet actions, the menu. Bad cases: captions were off for part of the call (the line shows the gap and the record says so in words); nothing was captured (one sentence says why, and the actions are not offered); Chrome wants a click before writing to the folder (one amber line with the button); a delete by mistake (Undo for eight seconds).
+
+Removed after the review: the filmstrip of thumbnails above the record (the line and the figures in the record carry it); the "Double-click to rename" tooltip (Rename is in the menu, the double-click still works); the counts in every index row.

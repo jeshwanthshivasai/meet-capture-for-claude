@@ -167,9 +167,10 @@ function mdToHtml(md) {
   await page.screenshot({ path: cap('left-card'), clip: { x: 240, y: 300, width: 800, height: 500 } });
   await app.bringToFront();
   await app.setViewportSize({ width: 1280, height: 800 });
-  await app.waitForSelector('.tl .entry', { timeout: 15000 });
+  await app.waitForSelector('.tl .line', { timeout: 15000 });
   await app.waitForFunction(() => !document.querySelector('.meta .live'), null, { timeout: 15000 });
-  await app.waitForSelector('.strip .thumb', { timeout: 5000 });
+  await app.waitForSelector('.figure img', { timeout: 5000 });
+  await app.waitForFunction(() => [...document.querySelectorAll('.figure img')].every((i) => /^blob:/.test(i.src) || !i.closest('.figure').getBoundingClientRect().top < 900), null, { timeout: 5000 }).catch(() => {});
   await app.addStyleTag({ content: '::-webkit-scrollbar{display:none}' });
   await sleep(800);
   await app.screenshot({ path: cap('app') });

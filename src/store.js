@@ -65,6 +65,11 @@
       all.sort((a, b) => a.takenAt - b.takenAt);
       return withData ? all : all.map(({ bytes, ...rest }) => ({ ...rest, size: bytes ? bytes.byteLength : 0 }));
     },
+    /** When each snapshot was taken, read from the keys alone: the index pages draw their lines from this without loading any image. */
+    async snapshotTimes(meetingId) {
+      const db = await open(); const keys = await req(db.transaction('snapshots').objectStore('snapshots').index('meetingId').getAllKeys(meetingId));
+      return keys.map((k) => Number(String(k).slice(String(k).lastIndexOf(':') + 1))).filter(Number.isFinite).sort((a, b) => a - b);
+    },
     async getSnapshot(key) { const db = await open(); return req(db.transaction('snapshots').objectStore('snapshots').get(key)); },
     async countSnapshots(meetingId) { const db = await open(); return req(db.transaction('snapshots').objectStore('snapshots').index('meetingId').count(meetingId)); },
     async deleteMeeting(id) {

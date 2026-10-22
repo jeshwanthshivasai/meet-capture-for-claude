@@ -1,5 +1,6 @@
-// Promo art without text, as the Web Store asks: caption lines flowing into a document, with the lens
-// from the icon watching a shared screen. Same palette as the icon and the panel.
+// Promo art without text, as the Web Store asks: caption lines flowing into a document, with the icon's
+// quotation mark on the shared screen. Same palette as the icon and the panel.
+const { quoteMark } = require('./icon');
 const INK = '#12161A', INK2 = '#1F282E', PAPER = '#F4F7F5', SOFT = '#AEB9BF', MINT = '#4CC9A8', LINE = '#2C383F';
 
 function defs(w, h) {
@@ -16,7 +17,7 @@ function caption(x, y, w, nameW, fill, op = 1) {
   return `<g opacity="${op}"><rect x="${x}" y="${y}" width="${nameW}" height="12" rx="6" fill="${MINT}"/><rect x="${x + nameW + 8}" y="${y}" width="${w - nameW - 8}" height="12" rx="6" fill="${fill}"/></g>`;
 }
 
-/** The shared screen: a window with a title bar and a slide, with the lens on its corner. */
+/** The shared screen: a window with a title bar and a slide, with the mark on its corner. */
 function screen(x, y, w) {
   const h = w * 0.6;
   return `<g>
@@ -28,7 +29,7 @@ function screen(x, y, w) {
     <rect x="${x + w * 0.1}" y="${y + h * 0.45}" width="${w * 0.75}" height="${h * 0.06}" rx="${h * 0.03}" fill="#8A969C"/>
     <rect x="${x + w * 0.1}" y="${y + h * 0.58}" width="${w * 0.6}" height="${h * 0.06}" rx="${h * 0.03}" fill="#8A969C"/>
     <rect x="${x + w * 0.1}" y="${y + h * 0.74}" width="${w * 0.35}" height="${h * 0.14}" rx="${h * 0.03}" fill="${MINT}"/>
-    <g><circle cx="${x + w * 0.9}" cy="${y + h * 0.9}" r="${w * 0.085}" fill="${MINT}"/><circle cx="${x + w * 0.9}" cy="${y + h * 0.9}" r="${w * 0.035}" fill="${INK}"/><circle cx="${x + w * 0.925}" cy="${y + h * 0.87}" r="${w * 0.012}" fill="${PAPER}" fill-opacity=".9"/></g>
+    ${quoteMark({ x: x + w * 0.78, y: y + h * 0.72, w: w * 0.16 })}
   </g>`;
 }
 
@@ -61,12 +62,12 @@ function promoTile() { // 440x280
 function marquee() { // 1400x560
   const W = 1400, H = 560;
   const caps = [];
-  for (let i = 0; i < 6; i++) caps.push(caption(110, 300 + i * 34, 520 - (i % 3) * 60, [80, 110, 64][i % 3], '#DDE3E0', 1 - i * 0.12));
+  for (let i = 0; i < 5; i++) caps.push(caption(110, 366 + i * 32, 480 - (i % 3) * 60, [80, 110, 64][i % 3], '#DDE3E0', 1 - i * 0.14)); // below the screen, not across it
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs(W, H)}
-    ${screen(110, 50, 540)}
+    ${screen(110, 40, 480)}
     ${caps.join('')}
-    <path d="M700 300 C 760 300, 760 300, 820 300" fill="none" stroke="${MINT}" stroke-width="5" stroke-dasharray="3 14" stroke-linecap="round"/>
-    <path d="M808 286 l24 14 -24 14z" fill="${MINT}"/>
+    <path d="M650 280 C 720 280, 720 280, 790 280" fill="none" stroke="${MINT}" stroke-width="5" stroke-dasharray="3 14" stroke-linecap="round"/>
+    <path d="M778 266 l24 14 -24 14z" fill="${MINT}"/>
     ${doc(880, 70, 320)}
   </svg>`;
 }

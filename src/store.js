@@ -25,6 +25,8 @@
   const req = (r) => new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
   const done = (t) => new Promise((resolve, reject) => { t.oncomplete = () => resolve(); t.onerror = () => reject(t.error); t.onabort = () => reject(t.error || new Error('transaction aborted')); });
   const lineKey = (meetingId, id) => `${meetingId}:${String(id).padStart(6, '0')}`;
+  const snapKey = (meetingId, takenAt) => `${meetingId}:${takenAt}`;
+  const snapTime = (key) => Number(String(key).slice(String(key).lastIndexOf(':') + 1)); // takenAt, read back from a snapshot key
 
   /** The meeting record without the heavy parts, for lists. */
   function summary(m) { return m; }
@@ -56,7 +58,7 @@
     async countLines(meetingId) { const db = await open(); return req(db.transaction('lines').objectStore('lines').index('meetingId').count(meetingId)); },
     async putSnapshot(meetingId, snap) {
       const db = await open(); const t = db.transaction('snapshots', 'readwrite');
-      const key = `${meetingId}:${snap.takenAt}`;
+      const key = snapKey(meetingId, snap.takenAt);
       t.objectStore('snapshots').put({ key, meetingId, takenAt: snap.takenAt, reason: snap.reason, source: snap.source, width: snap.width, height: snap.height, format: snap.format, bytes: snap.bytes, thumb: snap.thumb });
       await done(t); return key;
     },
@@ -68,7 +70,7 @@
     /** When each snapshot was taken, read from the keys alone: the index pages draw their lines from this without loading any image. */
     async snapshotTimes(meetingId) {
       const db = await open(); const keys = await req(db.transaction('snapshots').objectStore('snapshots').index('meetingId').getAllKeys(meetingId));
-      return keys.map((k) => Number(String(k).slice(String(k).lastIndexOf(':') + 1))).filter(Number.isFinite).sort((a, b) => a - b);
+      return keys.map(snapTime).filter(Number.isFinite).sort((a, b) => a - b);
     },
     async getSnapshot(key) { const db = await open(); return req(db.transaction('snapshots').objectStore('snapshots').get(key)); },
     async countSnapshots(meetingId) { const db = await open(); return req(db.transaction('snapshots').objectStore('snapshots').index('meetingId').count(meetingId)); },

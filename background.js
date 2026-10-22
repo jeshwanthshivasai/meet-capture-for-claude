@@ -41,11 +41,18 @@ async function housekeeping() {
   setTimeout(async () => {
     const stale = (await S.listMeetings(200).catch(() => [])).filter((m) => m.status === 'live' && ![...live.values()].some((e) => e.meetingId === m.id));
     for (const m of stale) {
-      await S.updateMeeting(m.id, { status: 'ended', endedAt: m.endedAt || m.startedAt + 1, endReason: 'browser closed', tabId: null });
+      await S.updateMeeting(m.id, { status: 'ended', endedAt: m.endedAt || await lastActivity(m), endReason: 'browser closed', tabId: null });
       if ((settings.afterCall === 'zip' || settings.afterCall === 'both') && !m.zipAt && (m.lineCount || m.snapshotCount)) exportZip(m.id, { auto: true });
     }
     if (stale.length) broadcastState();
   }, 15000);
+}
+/** When the last caption or snapshot was recorded: the end of a call whose end was never seen. */
+async function lastActivity(m) {
+  let t = m.startedAt + 1;
+  try { for (const l of await S.getLines(m.id)) t = Math.max(t, l.updatedAt || l.startedAt || 0); } catch (e) { /* the start will do */ }
+  try { for (const s of await S.snapshotTimes(m.id)) t = Math.max(t, s); } catch (e) { /* same */ }
+  return t;
 }
 async function restoreLive() {
   try {
@@ -59,6 +66,11 @@ const saveLive = () => chrome.storage.session.set({ live: [...live].map(([tabId,
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'content') contentPort(port);
   else if (port.name === 'app') appPort(port);
+});
+// A captures page that is closing cannot wait for its port to come back: a delete it still owes arrives as a plain message.
+chrome.runtime.onMessage.addListener((m, sender) => {
+  if (!m || m.target !== 'worker' || !sender || !sender.url || !sender.url.startsWith(APP_URL)) return;
+  if (m.type === 'delete' && m.meetingId) S.deleteMeeting(m.meetingId).then(broadcastState).catch((e) => console.warn('[MeetCapture]', e));
 });
 
 function contentPort(port) {

@@ -27,7 +27,7 @@
     meetings: [], live: [], settings: C.settingsWithDefaults(null), exporting: [], error: '', gotState: false,
     current: null, lines: new Map(), snaps: new Map(), marks: new Map(), loading: new Map(), status: new Map(), tidy: [],
     search: '', follow: true, folder: null, menuOpen: false, lightbox: null, autoSaved: new Set(),
-    hidden: new Set(), pendingDelete: new Map(), strip: { hoverX: null, cursor: 0 },
+    hidden: new Set(), pendingDelete: new Map(), strip: { hoverX: null, cursor: 0 }, focusSearch: false,
   };
 
   // ------------------------------------------------------------------ words
@@ -41,16 +41,30 @@
   const isLive = (m) => m && (m.status === 'live' || state.live.some((l) => l.meetingId === m.id));
   const titleOf = (m) => C.titleOf(m);
   const people = (m) => [...new Set((m.participants || []).map((p) => C.speakerAlias(p, C.selfName(m, state.settings))))];
-  const endOf = (m) => (isLive(m) ? Date.now() : (m.endedAt || m.startedAt));
+  /** The newest line or snapshot time this page knows: the end of a call whose end was never seen (the browser closed mid-call). */
+  const lastKnown = (m) => {
+    let t = 0;
+    const marks = state.marks.get(m.id); if (marks && marks.length) t = marks[marks.length - 1];
+    const lines = state.lines.get(m.id); if (lines) for (const l of lines.slice(-20)) t = Math.max(t, lineEnd(l));
+    return t;
+  };
+  const endOf = (m) => (isLive(m) ? Date.now() : Math.max(m.endedAt || m.startedAt, lastKnown(m)));
 
   // ------------------------------------------------------------------ port
   let port = null;
+  const outbox = []; // messages that must arrive (a delete, a rename, settings), kept while the port reconnects
   function connect() {
     try { port = chrome.runtime.connect({ name: 'app' }); } catch (e) { return; }
     port.onMessage.addListener(onMessage);
     port.onDisconnect.addListener(() => { void chrome.runtime.lastError; port = null; setTimeout(connect, 800); });
+    flush();
   }
-  const send = (m) => { if (port) { try { port.postMessage(m); } catch (e) { /* reconnecting */ } } };
+  function flush() { while (port && outbox.length) { try { port.postMessage(outbox[0]); outbox.shift(); } catch (e) { port = null; } } }
+  /** keep: queue the message through a reconnect instead of dropping it. */
+  function send(m, { keep = false } = {}) {
+    if (port) { try { port.postMessage(m); return; } catch (e) { port = null; } }
+    if (keep) outbox.push(m);
+  }
 
   function onMessage(m) {
     if (!m || typeof m.type !== 'string') return;
@@ -61,7 +75,7 @@
         for (const l of state.live) if (l.status && l.status.inCall) state.status.set(l.meetingId, l.status);
         for (const [id] of state.status) if (!state.live.some((l) => l.meetingId === id)) state.status.delete(id);
         if (state.current && !state.meetings.some((x) => x.id === state.current)) { renderMain(); break; }
-        if (state.current) { if ($('#head')) { renderHead(); scheduleTimeline(); } else { renderMain(); renderTimeline(); } } else renderMain();
+        if (state.current) { if ($('#head')) { renderHead(); scheduleTimeline(); } else renderMain(); } else renderMain();
         if ($('#settings').open) fillSettings();
         maybeAutoSave();
         break;
@@ -135,6 +149,7 @@
   }
   function renderIndex() {
     document.title = 'Meet Capture';
+    const focusSearch = state.focusSearch; state.focusSearch = false;
     if (state.error) { main.innerHTML = `<div class="hero"><h1>Storage problem</h1><p>${esc(state.error)}</p></div>`; return; }
     if (!state.gotState) { main.innerHTML = skeleton(); return; }
     if (!state.meetings.some((m) => !state.hidden.has(m.id))) {
@@ -143,6 +158,7 @@
     }
     if (!$('#index')) main.innerHTML = `<div class="page index" id="index"><div class="index-h"><h1>Meetings</h1><label class="search">${ICONS.search}<input id="search" type="search" placeholder="Find a meeting" aria-label="Find a meeting" autocomplete="off" value="${esc(state.search)}"></label></div><div id="groups"></div></div>`;
     renderGroups();
+    if (focusSearch) $('#search').focus();
   }
   function renderGroups() {
     const g = $('#groups'); if (!g) return;
@@ -157,7 +173,9 @@
       const when = live ? `<span class="live"><span class="live-dot"></span>Live</span> · ${esc(C.fmtClock(m.startedAt))} · ${esc(nice(end - m.startedAt))} so far` : `${esc(C.fmtClock(m.startedAt))} · ${esc(nice(end - m.startedAt))}`;
       html += `<a class="row" href="#m=${encodeURIComponent(m.id)}" data-id="${esc(m.id)}"><span class="rt">${esc(titleOf(m))}</span><span class="rw">${when}</span><span class="rs">${mini(m)}<span class="rp">${esc(names.join(', '))}</span></span></a>`;
     }
+    const focused = document.activeElement && g.contains(document.activeElement) ? document.activeElement.closest('.row') : null;
     g.innerHTML = html;
+    if (focused) { const again = g.querySelector(`.row[data-id="${CSS.escape(focused.dataset.id)}"]`); if (again) again.focus({ preventScroll: true }); } // a live list redraws; the row you tabbed to stays yours
     loadMarks(items);
   }
   /** Each meeting as a small line: its length, with a mark at each snapshot. Ninety minutes fill it. */
@@ -178,12 +196,14 @@
   }
   function updateMini(id) { const el = document.querySelector(`[data-mini="${CSS.escape(id)}"]`); const m = meetingById(id); if (el && m) el.innerHTML = miniTicks(m, el.offsetWidth || 100); }
   async function loadMarks(items) {
-    for (const m of items) {
-      if (state.marks.has(m.id)) continue;
+    await Promise.all(items.filter((m) => !state.marks.has(m.id)).map(async (m) => {
       state.marks.set(m.id, []);
-      try { state.marks.set(m.id, await S.snapshotTimes(m.id)); } catch (e) { /* the line stays plain */ }
+      try { // a snapshot that arrives while the keys are being read is already in the list: merge, never replace
+        const times = await S.snapshotTimes(m.id);
+        state.marks.set(m.id, [...new Set([...times, ...(state.marks.get(m.id) || [])])].sort((a, b) => a - b));
+      } catch (e) { /* the line stays plain */ }
       updateMini(m.id);
-    }
+    }));
   }
   main.addEventListener('input', (e) => { if (e.target.id === 'search') { state.search = e.target.value; renderGroups(); } });
 
@@ -191,8 +211,7 @@
   function renderMain() {
     if (!state.current) { renderIndex(); return; }
     const m = meetingById(state.current);
-    if (!m) { main.innerHTML = state.gotState ? `<div class="hero"><h1>That meeting is gone.</h1><p>It was deleted, or cleaned up after ${state.settings.keepDays} days.</p><p><a class="btn primary" href="#">All meetings</a></p></div>` : skeleton(); return; }
-    document.title = `${titleOf(m)} · Meet Capture`;
+    if (!m) { main.innerHTML = state.gotState ? `<div class="hero"><h1>That meeting is gone.</h1><p>${state.settings.keepDays > 0 ? `It was deleted, or cleaned up after ${plural(state.settings.keepDays, 'day')}.` : 'It was deleted.'}</p><p><a class="btn primary" href="#">All meetings</a></p></div>` : skeleton(); return; }
     main.innerHTML = `<article class="page">
       <div id="head"></div>
       <div class="strip-wrap" id="strip"></div>
@@ -201,8 +220,8 @@
       <div class="tl" id="tl"></div>
       <div class="follow" id="follow" hidden><button class="btn dark sm" data-act="follow">Jump to now ↓</button></div>
     </article>`;
+    renderTimeline(); // first: the head's callout reads the tidied lines
     renderHead();
-    renderTimeline();
   }
 
   function renderHead() {
@@ -241,20 +260,22 @@
   function renderCallout(m) {
     const c = $('#callout'); if (!c) return;
     if (isLive(m)) { c.innerHTML = ''; return; }
-    const lines = state.lines.get(m.id);
-    if (lines && !lines.length && !(m.snapshotCount || 0)) { c.innerHTML = '<p class="notice">Nothing was captured in this call: captions were off, and no screen was shared. Captions must be on in Meet for a transcript; the panel in Meet shows both as they happen.</p>'; return; }
+    const lines = state.lines.get(m.id), snaps = state.snaps.get(m.id) || [];
+    if (lines && !state.tidy.length && !snaps.length) { c.innerHTML = '<p class="notice">Nothing was captured in this call: captions were off, and no screen was shared. Captions must be on in Meet for a transcript; the panel in Meet shows both as they happen.</p>'; return; }
     if (state.settings.autoFolder && state.folder && !m.savedAt && state.autoSaved.has(m.id + ':denied')) {
       c.innerHTML = `<div class="ask"><span class="grow">Chrome needs a click before this page may write into <b>${esc(state.folder.name)}</b>.</span><button class="btn sm" data-act="folder">Save now</button></div>`; return;
     }
-    if (!state.settings.myName && lines && C.tidyLines(C.withNames(lines, m, state.settings)).some((l) => C.SELF_WORDS.test(l.speaker))) {
+    if (!state.settings.myName && state.tidy.some((l) => C.SELF_WORDS.test(l.speaker))) {
       c.innerHTML = '<div class="ask"><span class="grow">Meet labelled your own lines “You”. Add your name once, and every transcript uses it.</span><button class="btn sm" data-act="myname">Add my name</button></div>'; return;
     }
     c.innerHTML = '';
   }
+  let ticks = 0;
   setInterval(() => {
+    ticks++;
     const m = meetingById(state.current);
     if (m && isLive(m)) { const el = $('#elapsed'); if (el) el.textContent = C.fmtElapsed(Date.now() - m.startedAt); renderStrip(); }
-    if (!state.current && state.live.length && $('#groups') && Date.now() % 5000 < 1000) renderGroups();
+    if (!state.current && state.live.length && $('#groups') && ticks % 5 === 0) renderGroups();
   }, 1000);
 
   // ------------------------------------------------------------------ the record
@@ -336,6 +357,7 @@
     const t0 = m.startedAt, t1 = endOf(m);
     return { m, el, t0, t1, dur: Math.max(t1 - t0, 60000), snaps: state.snaps.get(m.id) || [], live: isLive(m) };
   }
+  let stripDrawn = { el: null, html: '' }; // what the track last showed, so an unchanged line is not redrawn
   function renderStrip() {
     const g = stripGeom(); if (!g) return;
     if (!state.lines.has(g.m.id)) { g.el.innerHTML = ''; return; }
@@ -344,10 +366,19 @@
     for (const l of state.tidy) { const a = l.startedAt, b = lineEnd(l), last = cov[cov.length - 1]; if (last && a - last[1] < GAP_MS) last[1] = Math.max(last[1], b); else cov.push([a, b]); }
     const covHtml = cov.map(([a, b]) => `<i class="cov" style="left:${pos(a).toFixed(2)}%;width:${Math.max(0.4, pos(b) - pos(a)).toFixed(2)}%"></i>`).join('');
     const tickHtml = g.snaps.map((s, i) => `<i class="tick${state.strip.cursor === i + 1 ? ' on' : ''}" style="left:${pos(s.takenAt).toFixed(2)}%" data-n="${i + 1}"></i>`).join('');
-    const label = `The meeting as a line: ${nice(g.dur)}${g.snaps.length ? `, ${plural(g.snaps.length, 'snapshot')}` : ''}. Arrow keys move between snapshots, Enter goes there.`;
-    g.el.innerHTML = `<div class="strip" tabindex="0" role="group" aria-label="${esc(label)}"><div class="track">${covHtml}${tickHtml}${g.live ? `<i class="now" style="left:${pos(g.t1).toFixed(2)}%"></i>` : ''}</div>
-      <div class="labels"><span>${esc(C.fmtClock(g.t0))}</span><span class="mid" data-el="readout"></span><span>${g.live ? 'now' : esc(C.fmtClock(g.t1))}</span></div>
+    const label = `The meeting as a line: ${nice(g.dur)}${g.snaps.length ? `, ${plural(g.snaps.length, 'snapshot')}. Arrow keys move between snapshots, Enter goes there` : ''}.`;
+    let strip = g.el.querySelector('.strip');
+    if (!strip) { // built once; later calls only move the marks, so focus and the preview survive a live call's updates
+      g.el.innerHTML = `<div class="strip" tabindex="0" role="group"><div class="track"></div>
+      <div class="labels"><span data-el="t0"></span><span class="mid" data-el="readout"></span><span data-el="t1"></span></div>
       <div class="tip" data-el="tip" hidden><img alt=""><span></span></div></div>`;
+      strip = g.el.querySelector('.strip');
+    }
+    strip.setAttribute('aria-label', label);
+    const trackHtml = `${covHtml}${tickHtml}${g.live ? `<i class="now" style="left:${pos(g.t1).toFixed(2)}%"></i>` : ''}`;
+    if (stripDrawn.el !== strip || stripDrawn.html !== trackHtml) { strip.querySelector('.track').innerHTML = trackHtml; stripDrawn = { el: strip, html: trackHtml }; } // unchanged marks are left alone
+    strip.querySelector('[data-el="t0"]').textContent = C.fmtClock(g.t0);
+    strip.querySelector('[data-el="t1"]').textContent = g.live ? 'now' : C.fmtClock(g.t1);
     if (state.strip.hoverX != null) stripHover(state.strip.hoverX); else if (state.strip.cursor) stripShow(state.strip.cursor - 1);
   }
   const speakerAt = (t) => { let who = ''; for (const l of state.tidy) { if (l.startedAt > t) break; if (lineEnd(l) >= t - 15000) who = l.speaker; } return who ? ' · ' + who : ''; };
@@ -360,7 +391,9 @@
     if (i >= 0 && g.snaps[i]) {
       const s = g.snaps[i], x = ((s.takenAt - g.t0) / g.dur) * g.el.clientWidth;
       readout.textContent = `Snapshot ${i + 1} · ${C.fmtTime(s.takenAt)} · ${reasonText(s)}`;
-      tip.hidden = false; tip.querySelector('img').src = s.thumb || ''; tip.querySelector('span').textContent = `Snapshot ${i + 1} · ${C.fmtClock(s.takenAt)}`;
+      const img = tip.querySelector('img'), thumb = s.thumb || '';
+      if (img.getAttribute('src') !== thumb) img.src = thumb;
+      tip.hidden = false; tip.querySelector('span').textContent = `Snapshot ${i + 1} · ${C.fmtClock(s.takenAt)}`;
       tip.style.left = `${Math.max(80, Math.min(g.el.clientWidth - 80, x))}px`;
     } else { readout.textContent = t == null ? '' : `${C.fmtClock(t)}${speakerAt(t)}`; tip.hidden = true; }
   }
@@ -376,7 +409,7 @@
     stripShow(i, g.t0 + frac * g.dur);
   }
   function stripLeave() { state.strip.hoverX = null; stripShow(state.strip.cursor ? state.strip.cursor - 1 : -1); }
-  function fracOf(e) { const tr = e.currentTarget; const r = tr.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); }
+  function fracOf(track, clientX) { const r = track.getBoundingClientRect(); return Math.max(0, Math.min(1, (clientX - r.left) / r.width)); }
   function flash(el) { if (!el) return; el.classList.add('hit'); setTimeout(() => el.classList.remove('hit'), 1400); }
   function jumpToSnap(n) { const el = $(`#snap-${n}`); if (!el) return; state.strip.cursor = n; el.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' }); flash(el); }
   function jumpToTime(t) {
@@ -385,7 +418,7 @@
     if (!el) return;
     el.scrollIntoView({ block: 'center', behavior: reduced ? 'auto' : 'smooth' }); flash(el);
   }
-  main.addEventListener('pointermove', (e) => { if (e.target.closest('.track')) { const tr = e.target.closest('.track'); const r = tr.getBoundingClientRect(); stripHover(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); } });
+  main.addEventListener('pointermove', (e) => { const tr = e.target.closest && e.target.closest('.track'); if (tr) stripHover(fracOf(tr, e.clientX)); });
   main.addEventListener('pointerout', (e) => { if (e.target.closest && e.target.closest('.track') && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.track'))) stripLeave(); });
   main.addEventListener('keydown', (e) => {
     if (!e.target.classList || !e.target.classList.contains('strip')) return;
@@ -401,7 +434,7 @@
   // ------------------------------------------------------------------ actions
   main.addEventListener('click', async (e) => {
     const tr = e.target.closest('.track');
-    if (tr) { const g = stripGeom(); if (!g) return; const frac = fracOf({ currentTarget: tr, clientX: e.clientX }); const i = nearestSnap(g, frac); if (i >= 0) jumpToSnap(i + 1); else jumpToTime(g.t0 + frac * g.dur); return; }
+    if (tr) { const g = stripGeom(); if (!g) return; const frac = fracOf(tr, e.clientX); const i = nearestSnap(g, frac); if (i >= 0) jumpToSnap(i + 1); else jumpToTime(g.t0 + frac * g.dur); return; }
     const b = e.target.closest('[data-act]'); if (!b) return;
     const m = meetingById(state.current);
     const act = b.dataset.act;
@@ -415,7 +448,7 @@
       else if (act === 'snapshot') send({ type: 'snapshot-now', tabId: m.tabId });
       else if (act === 'focus') send({ type: 'focus-meet', meetingId: m.id });
       else if (act === 'open-panel') { send({ type: 'open-panel', tabId: m.tabId }); send({ type: 'focus-meet', meetingId: m.id }); closeMenu(); }
-      else if (act === 'end') { closeMenu(); if (await confirm('Stop capturing this call?', 'What was captured so far is kept. The call itself continues.', 'Stop capturing')) send({ type: 'end-meeting', meetingId: m.id }); }
+      else if (act === 'end') { closeMenu(); if (await confirm('Stop capturing this call?', 'What was captured so far is kept. The call itself continues.', 'Stop capturing')) send({ type: 'end-meeting', meetingId: m.id }, { keep: true }); }
       else if (act === 'menu') { state.menuOpen = !state.menuOpen; renderHead(); if (state.menuOpen) $('.menu-list button') && $('.menu-list button').focus(); }
       else if (act === 'rename') { closeMenu(); startRename(m); }
       else if (act === 'meet-link') { closeMenu(); chrome.tabs.create({ url: m.url }); }
@@ -435,11 +468,21 @@
   function deleteWithUndo(m) {
     state.hidden.add(m.id);
     go('');
-    const timer = setTimeout(() => { state.pendingDelete.delete(m.id); send({ type: 'delete', meetingId: m.id }); }, 8000);
+    const timer = setTimeout(() => { state.pendingDelete.delete(m.id); send({ type: 'delete', meetingId: m.id }, { keep: true }); }, 8000);
     state.pendingDelete.set(m.id, timer);
-    toast(`Deleted “${titleOf(m)}”.`, { label: 'Undo', run: () => { clearTimeout(timer); state.pendingDelete.delete(m.id); state.hidden.delete(m.id); if (!state.current) { const i = $('#index'); if (i) renderGroups(); else renderMain(); } } });
+    const n = state.pendingDelete.size; // a second delete inside the eight seconds joins the first: one Undo brings both back
+    toast(n === 1 ? `Deleted “${titleOf(m)}”.` : `Deleted ${plural(n, 'meeting')}.`, { label: 'Undo', run: undoDeletes });
   }
-  window.addEventListener('pagehide', () => { for (const [id, t] of state.pendingDelete) { clearTimeout(t); send({ type: 'delete', meetingId: id }); } state.pendingDelete.clear(); });
+  function undoDeletes() {
+    for (const [id, t] of state.pendingDelete) { clearTimeout(t); state.hidden.delete(id); }
+    state.pendingDelete.clear();
+    if (!state.current) { if ($('#index')) renderGroups(); else renderMain(); }
+  }
+  // The page may close inside the eight seconds: the deletes it still owes go out at once, by the port or, while the port reconnects, as a plain message.
+  window.addEventListener('pagehide', () => {
+    for (const [id, t] of state.pendingDelete) { clearTimeout(t); send({ type: 'delete', meetingId: id }); if (!port) chrome.runtime.sendMessage({ target: 'worker', type: 'delete', meetingId: id }).catch(() => {}); }
+    state.pendingDelete.clear();
+  });
 
   function startRename(m) {
     const h = $('#title'); if (!h) return;
@@ -451,7 +494,7 @@
       if (done) return; done = true;
       const title = C.normalize(input.value);
       input.remove();
-      if (save && title && title !== titleOf(m)) { m.title = title; m.renamed = true; send({ type: 'rename', meetingId: m.id, title }); }
+      if (save && title && title !== titleOf(m)) { m.title = title; m.renamed = true; send({ type: 'rename', meetingId: m.id, title }, { keep: true }); }
       renderHead();
     };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); });
@@ -519,7 +562,7 @@
       const w = await fh.createWritable();
       await w.write(f.data); await w.close();
     }
-    send({ type: 'saved', meetingId: id, folder: handle.name, path: `${handle.name}/${sub}` });
+    send({ type: 'saved', meetingId: id, folder: handle.name, path: `${handle.name}/${sub}` }, { keep: true });
     state.autoSaved.add(id);
     toast(`Saved ${plural(files.length, 'file')} to ${handle.name}/${sub}`);
     return true;
@@ -625,15 +668,15 @@
     let t = null;
     form.addEventListener('input', (e) => { if (e.target.matches('input[type="text"], textarea, input[type="number"]')) { clearTimeout(t); t = setTimeout(() => saveSettings(readSettings()), 400); } });
     form.addEventListener('change', (e) => { if (!e.target.matches('input[type="text"], textarea')) saveSettings(readSettings()); });
-    $('#delete-all').addEventListener('click', async () => { if (await confirm('Delete all meetings?', 'Every captured meeting on this computer will be removed, except a call that is live now. Files you saved or downloaded stay.', 'Delete all')) { send({ type: 'delete-all' }); toast('All meetings deleted.'); } });
-    sd.addEventListener('click', async (e) => {
-      const b = e.target.closest('[data-f]'); if (!b) return;
-      try {
-        if (b.dataset.f === 'choose') { await chooseFolder(); fillSettings(); renderHead(); }
-        else if (b.dataset.f === 'forget') { await forgetFolder(); fillSettings(); }
-      } catch (err) { if (err && err.name !== 'AbortError') toast(String(err.message || err)); }
-    });
+    $('#delete-all').addEventListener('click', async () => { if (await confirm('Delete all meetings?', 'Every captured meeting on this computer will be removed, except a call that is live now. Files you saved or downloaded stay.', 'Delete all')) { send({ type: 'delete-all' }, { keep: true }); toast('All meetings deleted.'); } });
   }
+  sd.addEventListener('click', async (e) => { // once, on the dialog itself: the form inside is rebuilt on every open
+    const b = e.target.closest('[data-f]'); if (!b) return;
+    try {
+      if (b.dataset.f === 'choose') { await chooseFolder(); fillSettings(); renderHead(); }
+      else if (b.dataset.f === 'forget') { await forgetFolder(); fillSettings(); }
+    } catch (err) { if (err && err.name !== 'AbortError') toast(String(err.message || err)); }
+  });
   function fillSettings() {
     const form = $('#settings-form'); if (!form) return;
     const s = state.settings;
@@ -658,24 +701,27 @@
     }
     return out;
   }
-  function saveSettings(patch) { state.settings = C.settingsWithDefaults({ ...state.settings, ...patch }); send({ type: 'settings', settings: state.settings }); if (state.current) { renderHead(); scheduleTimeline(); } }
+  function saveSettings(patch) { state.settings = C.settingsWithDefaults({ ...state.settings, ...patch }); send({ type: 'settings', settings: state.settings }, { keep: true }); if (state.current) { renderHead(); scheduleTimeline(); } }
   $('#settings-btn').addEventListener('click', openSettings);
 
   // ------------------------------------------------------------------ toast
-  let toastTimer = null;
+  let toastTimer = null, toastHolds = false;
+  const toastQueue = []; // plain toasts that arrived while one with an action (Undo) was showing: they wait their turn
   function toast(text, action) {
+    if (toastHolds && !action) { toastQueue.push(text); return; }
     toastEl.innerHTML = `<span>${esc(text)}</span>${action ? `<button type="button">${esc(action.label)}</button>` : ''}`;
+    toastHolds = !!action;
+    clearTimeout(toastTimer);
+    const hide = () => { toastEl.classList.remove('show'); toastHolds = false; if (toastQueue.length) setTimeout(() => { if (!toastHolds) toast(toastQueue.shift()); }, 300); };
     if (action) toastEl.querySelector('button').addEventListener('click', () => { action.run(); hide(); });
     toastEl.classList.add('show');
-    clearTimeout(toastTimer);
-    const hide = () => toastEl.classList.remove('show');
     toastTimer = setTimeout(hide, action ? 8000 : 4500);
   }
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== '/' || e.target.matches('input, textarea') || document.querySelector('dialog[open]')) return;
     e.preventDefault();
-    if (state.current) go('');
+    if (state.current) { state.focusSearch = true; go(''); return; } // the index renders on the hash change and focuses the search then
     const s = $('#search'); if (s) s.focus();
   });
 

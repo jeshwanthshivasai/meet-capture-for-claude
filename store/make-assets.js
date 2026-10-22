@@ -170,7 +170,7 @@ function mdToHtml(md) {
   await app.waitForSelector('.tl .line', { timeout: 15000 });
   await app.waitForFunction(() => !document.querySelector('.meta .live'), null, { timeout: 15000 });
   await app.waitForSelector('.figure img', { timeout: 5000 });
-  await app.waitForFunction(() => [...document.querySelectorAll('.figure img')].every((i) => /^blob:/.test(i.src) || !i.closest('.figure').getBoundingClientRect().top < 900), null, { timeout: 5000 }).catch(() => {});
+  await app.waitForFunction(() => [...document.querySelectorAll('.figure img')].every((i) => /^blob:/.test(i.src) || i.closest('.figure').getBoundingClientRect().top >= 900), null, { timeout: 5000 }).catch(() => {});
   await app.addStyleTag({ content: '::-webkit-scrollbar{display:none}' });
   await sleep(800);
   await app.screenshot({ path: cap('app') });

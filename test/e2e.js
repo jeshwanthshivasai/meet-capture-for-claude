@@ -104,7 +104,7 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   console.log('captures page shows', n, 'lines and', thumbs, 'snapshots;', ticks, 'marks on the line');
   if (ticks !== thumbs) errors.push(`the meeting line has ${ticks} marks for ${thumbs} snapshots`);
   // The line: hovering near a mark names the snapshot and shows it; clicking goes to it in the record.
-  const tick = await app.$('.strip .tick');
+  const tick = app.locator('.strip .tick').first(); // a locator: the marks are redrawn when the worker's state arrives, a handle could go stale
   await tick.scrollIntoViewIfNeeded();
   const box = await tick.boundingBox();
   await app.mouse.move(10, 400);
@@ -210,8 +210,9 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   await sleep(500);
   const renamed = await sw.evaluate(async () => (await MCC.store.listMeetings())[0].title);
   if (renamed !== 'Design sync · renamed') errors.push('the rename was not stored: ' + renamed);
-  await app.click('#crumb');
+  await app.keyboard.press('/'); // from a meeting, "/" goes to the index and lands in the search box
   await app.waitForSelector('#index .row', { timeout: 3000 });
+  if (!(await app.evaluate(() => document.activeElement && document.activeElement.id === 'search'))) errors.push('"/" from a meeting did not focus the search box');
   const listTitle = await app.$eval('#index .row .rt', (el) => el.textContent);
   if (listTitle !== 'Design sync · renamed') errors.push('the index does not show the new title: ' + listTitle);
   const miniTicks = await app.$$eval('#index .row .mini i', (els) => els.length);
@@ -241,8 +242,37 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   await app.waitForSelector('.strip .now', { timeout: 5000 });
   await app.screenshot({ path: path.join(OUT, '6-app-live.png') });
   console.log('the captures page follows the live call');
+  // The line is redrawn every second while live; the keyboard cursor and focus must survive that.
+  await app.waitForSelector('.strip .tick', { timeout: 25000 });
+  await app.focus('.strip');
+  await app.keyboard.press('ArrowRight');
+  await sleep(2300);
+  const kept = await app.evaluate(() => document.activeElement === document.querySelector('.strip') && !!document.querySelector('.strip .tick.on') && document.querySelector('[data-el="readout"]').textContent.startsWith('Snapshot 1'));
+  if (!kept) errors.push('the meeting line lost focus or its cursor while the call was live');
+  console.log('keyboard cursor on the line survives the live redraws');
   await page.click('#leave');
   await sleep(2500);
+
+  // 10. Delete with Undo: the row leaves at once, Undo brings it back, a second delete reaches storage after eight seconds.
+  await app.bringToFront();
+  await app.waitForSelector('[data-act="menu"]', { timeout: 5000 });
+  const total = (await sw.evaluate(() => MCC.store.listMeetings())).length;
+  await app.click('[data-act="menu"]');
+  await app.click('.menu-list [data-act="delete"]');
+  await app.waitForSelector('#index .row', { timeout: 3000 });
+  if ((await app.$$eval('#index .row', (els) => els.length)) !== total - 1) errors.push('the deleted meeting did not leave the list at once');
+  await app.click('#toast button');
+  await app.waitForFunction((n) => document.querySelectorAll('#index .row').length === n, total, { timeout: 3000 });
+  if ((await sw.evaluate(() => MCC.store.listMeetings())).length !== total) errors.push('Undo did not keep the meeting');
+  await app.click('#index .row');
+  await app.waitForSelector('[data-act="menu"]', { timeout: 3000 });
+  await app.click('[data-act="menu"]');
+  await app.click('.menu-list [data-act="delete"]');
+  await app.waitForSelector('#index', { timeout: 3000 });
+  await sleep(8800);
+  const left = (await sw.evaluate(() => MCC.store.listMeetings())).length;
+  if (left !== total - 1) errors.push(`the delete did not reach storage after the undo window: ${left} of ${total} meetings remain`);
+  console.log('delete with Undo: hidden at once, back on Undo, gone from storage after the eight seconds');
 
   await ctx.close();
   console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no errors');

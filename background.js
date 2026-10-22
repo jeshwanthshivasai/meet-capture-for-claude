@@ -1,6 +1,6 @@
 // The service worker. It keeps track of live calls, stores what the Meet tab sends (captions and
-// snapshots), feeds the side panel, and runs exports: the offscreen page builds the files, the
-// downloads API writes them under Downloads/Meet captures. Nothing here talks to the network.
+// snapshots), feeds the captures page, and runs exports: the offscreen page builds the ZIP, the
+// downloads API writes it under Downloads/Meet captures. Nothing here talks to the network.
 importScripts('src/common.js', 'src/store.js', 'src/export.js');
 const C = MCC, S = MCC.store;
 
@@ -12,28 +12,37 @@ chrome.storage.onChanged.addListener((ch, area) => {
 
 const live = new Map();      // tabId → { meetingId, port, status }
 const endTimers = new Map(); // meetingId → timer: grace period after the page goes away
-const panels = new Set();    // side panel ports
+const apps = new Set();      // ports of open captures pages
 const exporting = new Set(); // meeting ids being exported
+const APP_URL = chrome.runtime.getURL('app/index.html');
 
-const openOnClick = () => chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 chrome.runtime.onInstalled.addListener(async (d) => {
-  openOnClick();
   if (d.reason === 'install') await chrome.storage.local.set({ settings: C.DEFAULT_SETTINGS }).catch(() => {});
+  else if (d.reason === 'update') { // settings from 1.x: keep what still exists, map the old export switch
+    const { settings: old } = await chrome.storage.local.get('settings').catch(() => ({}));
+    if (old && typeof old === 'object') {
+      const next = C.settingsWithDefaults(old);
+      if (old.autoExport === false) next.afterCall = 'open';
+      else if (old.autoExport === true && old.exportFormat === 'zip') next.afterCall = 'both';
+      await chrome.storage.local.set({ settings: next }).catch(() => {});
+    }
+    chrome.sidePanel && chrome.sidePanel.setPanelBehavior && chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+  }
   housekeeping();
 });
-chrome.runtime.onStartup.addListener(() => { openOnClick(); housekeeping(); });
-openOnClick();
+chrome.runtime.onStartup.addListener(housekeeping);
+chrome.action.onClicked.addListener(() => openApp(null));
 restoreLive();
 
 async function housekeeping() {
   await settingsReady;
-  try { await S.prune(settings.keepDays); } catch (e) { /* storage trouble is reported when the panel opens */ }
+  try { await S.prune(settings.keepDays); } catch (e) { /* storage trouble is reported when the page opens */ }
   // Meetings left "live" by a browser that closed mid-call: give their tabs a moment to come back, then close them off.
   setTimeout(async () => {
     const stale = (await S.listMeetings(200).catch(() => [])).filter((m) => m.status === 'live' && ![...live.values()].some((e) => e.meetingId === m.id));
     for (const m of stale) {
       await S.updateMeeting(m.id, { status: 'ended', endedAt: m.endedAt || m.startedAt + 1, endReason: 'browser closed', tabId: null });
-      if (settings.autoExport && !m.exportedAt && (m.lineCount || m.snapshotCount)) exportMeeting(m.id, { auto: true });
+      if ((settings.afterCall === 'zip' || settings.afterCall === 'both') && !m.zipAt && (m.lineCount || m.snapshotCount)) exportZip(m.id, { auto: true });
     }
     if (stale.length) broadcastState();
   }, 15000);
@@ -49,7 +58,7 @@ const saveLive = () => chrome.storage.session.set({ live: [...live].map(([tabId,
 // ------------------------------------------------------------------ ports
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name === 'content') contentPort(port);
-  else if (port.name === 'panel') panelPort(port);
+  else if (port.name === 'app') appPort(port);
 });
 
 function contentPort(port) {
@@ -75,7 +84,7 @@ function contentPort(port) {
         const existing = await S.getMeeting(m.meeting.id);
         const rec = existing || { id: m.meeting.id, code: m.meeting.code, title: m.meeting.title, startedAt: m.meeting.startedAt, url: m.meeting.url, myName: m.meeting.myName || '', lineCount: 0, snapshotCount: 0, participants: [] };
         rec.status = 'live'; rec.tabId = tabId; rec.endedAt = null;
-        if (m.meeting.title) rec.title = m.meeting.title;
+        if (m.meeting.title && !rec.renamed) rec.title = m.meeting.title;
         if (m.meeting.myName && !rec.myName) rec.myName = m.meeting.myName;
         await S.putMeeting(rec);
         live.set(tabId, { meetingId: rec.id, port, status: (cur && cur.status) || {} });
@@ -106,7 +115,7 @@ function contentPort(port) {
       }
       case 'meeting-update': {
         if (!cur || m.meetingId !== cur.meetingId) return;
-        await S.updateMeeting(cur.meetingId, (rec) => { if (m.title) rec.title = m.title; if (m.myName && !rec.myName) rec.myName = m.myName; return rec; });
+        await S.updateMeeting(cur.meetingId, (rec) => { if (m.title && !rec.renamed) rec.title = m.title; if (m.myName && !rec.myName) rec.myName = m.myName; return rec; });
         throttledState();
         return;
       }
@@ -116,6 +125,8 @@ function contentPort(port) {
       }
       case 'candidates': broadcast({ type: 'candidates', tabId, chosen: m.chosen, candidates: m.candidates }); return;
       case 'toast': broadcast({ type: 'toast', text: m.text }); return;
+      case 'open-app': return openApp(m.meetingId || (cur && cur.meetingId) || null);
+      case 'open-claude': if (m.meetingId) await openClaude(m.meetingId); return;
       case 'meeting-end': {
         if (!cur || m.meetingId !== cur.meetingId) return;
         // "page closed" also fires on a reload mid-call; the page comes back within seconds and says hello again.
@@ -139,7 +150,7 @@ async function storeSnapshot(meetingId, s) {
   const key = await S.putSnapshot(meetingId, { takenAt: s.takenAt, reason: s.reason, source: s.source, width: s.width, height: s.height, format: s.format, bytes, thumb: s.thumb });
   const count = await S.countSnapshots(meetingId);
   await S.updateMeeting(meetingId, { snapshotCount: count });
-  broadcast({ type: 'snapshot', meetingId, snapshot: { key, takenAt: s.takenAt, reason: s.reason, source: s.source, width: s.width, height: s.height, size: bytes.byteLength, thumb: s.thumb } });
+  broadcast({ type: 'snapshot', meetingId, snapshot: { key, meetingId, takenAt: s.takenAt, reason: s.reason, source: s.source, width: s.width, height: s.height, size: bytes.byteLength, thumb: s.thumb } });
   throttledState();
 }
 
@@ -163,23 +174,41 @@ async function endMeeting(tabId, endedAt, reason) {
   const rec = await S.updateMeeting(cur.meetingId, (m) => { m.status = 'ended'; m.endedAt = endedAt; m.endReason = reason; m.tabId = null; return m; });
   broadcastState();
   await settingsReady;
-  if (rec && settings.autoExport && (rec.lineCount || 0) + (rec.snapshotCount || 0) > 0) setTimeout(() => exportMeeting(cur.meetingId, { auto: true }), 1500);
+  if (!rec || (rec.lineCount || 0) + (rec.snapshotCount || 0) === 0) return;
+  const after = settings.afterCall;
+  if (after === 'open' || after === 'both') openApp(cur.meetingId, { active: reason !== 'tab closed' });
+  if (after === 'zip' || after === 'both') setTimeout(() => exportZip(cur.meetingId, { auto: true }), 1000);
+  if (settings.openClaude) setTimeout(() => openClaude(cur.meetingId).catch(() => {}), 1500);
 }
 
 function badge(tabId, on) {
   chrome.action.setBadgeText({ tabId, text: on ? 'REC' : '' }).catch(() => {});
-  if (on) chrome.action.setBadgeBackgroundColor({ tabId, color: '#E0533E' }).catch(() => {});
+  if (on) chrome.action.setBadgeBackgroundColor({ tabId, color: '#dc362e' }).catch(() => {});
 }
 
-// ------------------------------------------------------------------ the side panel
-function panelPort(port) {
-  panels.add(port);
-  port.onDisconnect.addListener(() => { void chrome.runtime.lastError; panels.delete(port); });
-  port.onMessage.addListener((m) => { onPanel(port, m).catch((e) => { console.warn('[MeetCapture]', e); safePost(port, { type: 'toast', text: String((e && e.message) || e) }); }); });
+/** Opens the captures page (or brings the open one forward), at one meeting when asked. */
+async function openApp(meetingId, { active = true } = {}) {
+  const url = APP_URL + (meetingId ? '#m=' + encodeURIComponent(meetingId) : '');
+  const tabs = await chrome.tabs.query({ url: APP_URL + '*' }).catch(() => []);
+  if (tabs.length) {
+    const t = tabs[0];
+    await chrome.tabs.update(t.id, { active, url }).catch(() => {});
+    if (active) chrome.windows.update(t.windowId, { focused: true }).catch(() => {});
+    if (meetingId) broadcast({ type: 'show', meetingId });
+    return;
+  }
+  await chrome.tabs.create({ url, active });
+}
+
+// ------------------------------------------------------------------ the captures page
+function appPort(port) {
+  apps.add(port);
+  port.onDisconnect.addListener(() => { void chrome.runtime.lastError; apps.delete(port); });
+  port.onMessage.addListener((m) => { onApp(port, m).catch((e) => { console.warn('[MeetCapture]', e); safePost(port, { type: 'toast', text: String((e && e.message) || e) }); }); });
   settingsReady.then(() => sendState(port));
 }
 
-async function onPanel(port, m) {
+async function onApp(port, m) {
   if (!m || typeof m.type !== 'string') return;
   switch (m.type) {
     case 'state': return sendState(port);
@@ -187,22 +216,17 @@ async function onPanel(port, m) {
     case 'enable-captions': forward(m.tabId, { type: 'enable-captions' }); return;
     case 'candidates': forward(m.tabId, { type: 'candidates' }); return;
     case 'choose-source': forward(m.tabId, { type: 'choose-source', id: m.id }); return;
-    case 'export': return exportMeeting(m.meetingId, { auto: false });
+    case 'open-panel': forward(m.tabId, { type: 'open-panel' }); return;
+    case 'focus-meet': { const e = [...live.entries()].find(([id, x]) => x.meetingId === m.meetingId); if (e) { const tab = await chrome.tabs.get(e[0]).catch(() => null); if (tab) { chrome.tabs.update(tab.id, { active: true }).catch(() => {}); chrome.windows.update(tab.windowId, { focused: true }).catch(() => {}); } } return; }
+    case 'export': return exportZip(m.meetingId, { auto: false });
     case 'delete': await S.deleteMeeting(m.meetingId); return broadcastState();
     case 'delete-all': for (const x of await S.listMeetings(1000)) if (x.status !== 'live') await S.deleteMeeting(x.id); return broadcastState();
-    case 'markdown': safePost(port, { type: 'markdown', meetingId: m.meetingId, text: await markdownFor(m.meetingId) }); return;
+    case 'rename': { const title = C.normalize(m.title).slice(0, 120); if (title) await S.updateMeeting(m.meetingId, { title, renamed: true }); return broadcastState(); }
+    case 'saved': await S.updateMeeting(m.meetingId, { savedAt: Date.now(), savedFolder: m.folder, savedPath: m.path }); return broadcastState();
     case 'open-claude': return openClaude(m.meetingId);
     case 'settings': await chrome.storage.local.set({ settings: C.settingsWithDefaults(m.settings) }); return;
-    case 'lines': safePost(port, { type: 'lines-all', meetingId: m.meetingId, lines: await S.getLines(m.meetingId) }); return;
-    case 'snapshots': safePost(port, { type: 'snapshots-all', meetingId: m.meetingId, snapshots: await S.getSnapshots(m.meetingId) }); return;
     case 'usage': safePost(port, { type: 'usage', usage: await S.usage() }); return;
-    case 'display-snapshot': {
-      const e = [...live.values()].find((x) => x.meetingId === m.meetingId);
-      if (!e || !m.snapshot) return safePost(port, { type: 'toast', text: 'That call has ended; the snapshot was not kept.' });
-      await storeSnapshot(m.meetingId, m.snapshot);
-      return;
-    }
-    case 'end-meeting': { for (const [tabId, e] of live) if (e.meetingId === m.meetingId) await endMeeting(tabId, Date.now(), 'ended from the panel'); return; }
+    case 'end-meeting': { for (const [tabId, e] of live) if (e.meetingId === m.meetingId) await endMeeting(tabId, Date.now(), 'ended from the captures page'); return; }
     default: return;
   }
 }
@@ -217,15 +241,15 @@ function forward(tabId, msg) {
 async function fullState() {
   await settingsReady;
   let meetings = [], error = '';
-  try { meetings = await S.listMeetings(60); } catch (e) { error = 'Storage is not available: ' + String((e && e.message) || e); }
+  try { meetings = await S.listMeetings(500); } catch (e) { error = 'Storage is not available: ' + String((e && e.message) || e); }
   const liveList = [...live.entries()].map(([tabId, e]) => ({ tabId, meetingId: e.meetingId, status: e.status, connected: !!e.port }));
   return { type: 'state', live: liveList, meetings, settings, exporting: [...exporting], error };
 }
-function safePost(port, m) { try { port.postMessage(m); } catch (e) { panels.delete(port); } }
-function broadcast(m) { for (const p of panels) safePost(p, m); }
+function safePost(port, m) { try { port.postMessage(m); } catch (e) { apps.delete(port); } }
+function broadcast(m) { for (const p of apps) safePost(p, m); }
 let stateTimer = null;
 function throttledState() { if (stateTimer) return; stateTimer = setTimeout(() => { stateTimer = null; broadcastState(); }, 700); }
-async function broadcastState() { if (!panels.size) return; const s = await fullState(); for (const p of panels) safePost(p, s); }
+async function broadcastState() { if (!apps.size) return; const s = await fullState(); for (const p of apps) safePost(p, s); }
 async function sendState(port) { safePost(port, await fullState()); }
 
 // ------------------------------------------------------------------ keyboard shortcut
@@ -235,7 +259,7 @@ chrome.commands.onCommand.addListener(async (cmd) => {
   forward(tab ? tab.id : null, { type: 'snapshot-now' });
 });
 
-// ------------------------------------------------------------------ exports
+// ------------------------------------------------------------------ the ZIP export
 const OFFSCREEN_URL = 'offscreen/offscreen.html';
 let creating = null;
 async function ensureOffscreen() {
@@ -244,14 +268,15 @@ async function ensureOffscreen() {
     let has = false;
     try { has = await chrome.offscreen.hasDocument(); } catch (e) { has = false; }
     if (!has) {
-      try { await chrome.offscreen.createDocument({ url: OFFSCREEN_URL, reasons: ['BLOBS'], justification: 'Build the meeting export files in memory and hand them to the downloads API' }); }
+      try { await chrome.offscreen.createDocument({ url: OFFSCREEN_URL, reasons: ['BLOBS'], justification: 'Build the meeting ZIP in memory and hand it to the downloads API' }); }
       catch (e) { if (!/already|exist/i.test(String(e && e.message))) throw e; }
     }
   })().finally(() => { creating = null; });
   return creating;
 }
 
-async function exportMeeting(meetingId, { auto } = {}) {
+/** One ZIP with the transcript and the snapshots, saved as Downloads/Meet captures/<date time title>.zip. */
+async function exportZip(meetingId, { auto } = {}) {
   await settingsReady;
   if (exporting.has(meetingId)) return;
   exporting.add(meetingId);
@@ -264,17 +289,11 @@ async function exportMeeting(meetingId, { auto } = {}) {
     const res = await chrome.runtime.sendMessage({ target: 'offscreen', type: 'build', meetingId, settings });
     if (!res) throw new Error('The export page did not answer.');
     if (res.error) throw new Error(res.error);
-    urls = res.files.map((f) => f.url);
-    const paths = [];
-    for (const f of res.files) {
-      const id = await chrome.downloads.download({ url: f.url, filename: f.filename, conflictAction: 'uniquify', saveAs: false });
-      const item = await waitDownload(id);
-      paths.push(item.filename || f.filename);
-    }
-    const still = await S.getMeeting(meetingId);
-    await S.updateMeeting(meetingId, { exportedAt: Date.now(), exportFolder: res.folder, exportFiles: res.files.map((f) => f.filename.split('/').pop()), exportPaths: paths, status: still && still.status === 'live' ? 'live' : 'exported' });
-    broadcast({ type: 'exported', meetingId, folder: res.folder, files: res.files.map((f) => f.filename.split('/').pop()), paths, auto: !!auto });
-    if (settings.openClaude) openClaude(meetingId).catch(() => {});
+    urls = [res.url];
+    const id = await chrome.downloads.download({ url: res.url, filename: res.filename, conflictAction: 'uniquify', saveAs: false });
+    const item = await waitDownload(id);
+    await S.updateMeeting(meetingId, { zipAt: Date.now(), zipFile: res.filename, zipPath: item.filename || res.filename, zipBytes: res.size });
+    broadcast({ type: 'exported', meetingId, file: res.filename, path: item.filename || res.filename, downloadId: id, auto: !!auto });
   } catch (e) {
     broadcast({ type: 'export-failed', meetingId, error: String((e && e.message) || e) });
   } finally {
@@ -312,10 +331,11 @@ async function markdownFor(meetingId) {
 }
 
 const CLAUDE_NEW = 'https://claude.ai/new';
-const CLAUDE_PREFILL_MAX = 60000; // characters; longer transcripts are pasted by hand (the panel copies them)
+const CLAUDE_PREFILL_MAX = 60000; // characters; longer transcripts are pasted by hand (the page copies them)
 async function openClaude(meetingId) {
   const text = await markdownFor(meetingId);
-  const url = text.length <= CLAUDE_PREFILL_MAX ? `${CLAUDE_NEW}?q=${encodeURIComponent(text)}` : CLAUDE_NEW;
-  await chrome.tabs.create({ url });
-  return text.length <= CLAUDE_PREFILL_MAX;
+  const fits = text.length <= CLAUDE_PREFILL_MAX;
+  await chrome.tabs.create({ url: fits ? `${CLAUDE_NEW}?q=${encodeURIComponent(text)}` : CLAUDE_NEW });
+  broadcast({ type: 'claude-opened', meetingId, fits });
+  return fits;
 }

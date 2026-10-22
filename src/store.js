@@ -1,8 +1,8 @@
 // Everything captured is kept in IndexedDB inside the extension (database "meet-capture"), on this computer.
-// Used by the service worker, the side panel and the offscreen page. Snapshots are stored as bytes.
+// Used by the service worker, the captures page and the offscreen page. Snapshots are stored as bytes.
 (function (root) {
   const NS = (root.MCC = root.MCC || {});
-  const DB_NAME = 'meet-capture', DB_VERSION = 1;
+  const DB_NAME = 'meet-capture', DB_VERSION = 2;
   let opening = null;
 
   function open() {
@@ -14,6 +14,7 @@
         if (!db.objectStoreNames.contains('meetings')) db.createObjectStore('meetings', { keyPath: 'id' }).createIndex('startedAt', 'startedAt');
         if (!db.objectStoreNames.contains('lines')) db.createObjectStore('lines', { keyPath: 'key' }).createIndex('meetingId', 'meetingId');
         if (!db.objectStoreNames.contains('snapshots')) db.createObjectStore('snapshots', { keyPath: 'key' }).createIndex('meetingId', 'meetingId');
+        if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv', { keyPath: 'key' }); // small things such as the folder you save to
       };
       r.onsuccess = () => { const db = r.result; db.onversionchange = () => { db.close(); opening = null; }; resolve(db); };
       r.onerror = () => { opening = null; reject(r.error || new Error('IndexedDB failed to open')); };
@@ -64,6 +65,7 @@
       all.sort((a, b) => a.takenAt - b.takenAt);
       return withData ? all : all.map(({ bytes, ...rest }) => ({ ...rest, size: bytes ? bytes.byteLength : 0 }));
     },
+    async getSnapshot(key) { const db = await open(); return req(db.transaction('snapshots').objectStore('snapshots').get(key)); },
     async countSnapshots(meetingId) { const db = await open(); return req(db.transaction('snapshots').objectStore('snapshots').index('meetingId').count(meetingId)); },
     async deleteMeeting(id) {
       const db = await open(); const t = db.transaction(['meetings', 'lines', 'snapshots'], 'readwrite');
@@ -83,6 +85,9 @@
       for (const m of old) await store.deleteMeeting(m.id);
       return old.length;
     },
+    async getKV(key) { const db = await open(); const r = await req(db.transaction('kv').objectStore('kv').get(key)); return r ? r.value : undefined; },
+    async setKV(key, value) { const db = await open(); const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').put({ key, value }); await done(t); },
+    async deleteKV(key) { const db = await open(); const t = db.transaction('kv', 'readwrite'); t.objectStore('kv').delete(key); await done(t); },
     async usage() {
       const db = await open();
       const snaps = await req(db.transaction('snapshots').objectStore('snapshots').getAll());

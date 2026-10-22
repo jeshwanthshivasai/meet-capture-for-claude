@@ -32,23 +32,35 @@
   }
 
   /**
-   * Decides when an automatic snapshot is due. Feed it one signature every couple of seconds.
-   * It asks for a snapshot when a new source appears, when the picture has changed from the last saved
-   * snapshot and then held still (so a slide is captured once, after the transition), and on a timer.
+   * Decides when an automatic snapshot is due. Feed it one signature about every second.
+   * A new picture is captured the moment it appears (so a screen shown only briefly is still kept),
+   * and once more when it has settled if it ended up different from that first look. Pictures seen
+   * recently are not captured again, a new source is, and a timer can add regular ones. When frames
+   * keep changing for a long time (a video, constant scrolling) it slows down to one every so often.
    */
   function createChangeDetector(o = {}) {
-    let threshold = o.threshold ?? 0.035, settleMs = o.settleMs ?? 1500, minGapMs = o.minGapMs ?? 4000, timerMs = o.timerMs ?? 0;
+    let threshold = o.threshold ?? 0.035, settleMs = o.settleMs ?? 1200, minGapMs = o.minGapMs ?? 1200, timerMs = o.timerMs ?? 0;
+    let quickEveryMs = o.quickEveryMs ?? 2500, dupeWindowMs = o.dupeWindowMs ?? 90000, busyAfter = o.busyAfter ?? 20, busyEveryMs = o.busyEveryMs ?? 15000;
     const now = o.now || (() => Date.now());
-    let lastSaved = null, lastSavedAt = 0, lastSig = null, pendingSince = 0, lastSource = null, pendingSource = false;
+    let lastSaved = null, lastSavedAt = 0, lastSig = null, pendingSince = 0, lastQuickAt = 0, lastSource = null, pendingSource = false;
+    const recent = [];     // the last saved signatures, so the same picture is not kept twice
+    const savedAt = [];    // times of recent saves, to notice a busy picture
+    const seenLately = (sig, t) => recent.some((r) => t - r.t <= dupeWindowMs && difference(sig, r.sig) < threshold / 2);
     return {
       configure(c) {
         if (c.threshold != null) threshold = c.threshold;
         if (c.timerMs != null) timerMs = c.timerMs;
         if (c.minGapMs != null) minGapMs = c.minGapMs;
         if (c.settleMs != null) settleMs = c.settleMs;
+        if (c.quickEveryMs != null) quickEveryMs = c.quickEveryMs;
+        if (c.busyEveryMs != null) busyEveryMs = c.busyEveryMs;
       },
-      saved(sig, t = now()) { lastSaved = sig; lastSavedAt = t; pendingSince = 0; pendingSource = false; },
-      reset() { lastSaved = null; lastSavedAt = 0; lastSig = null; pendingSince = 0; lastSource = null; pendingSource = false; },
+      saved(sig, t = now()) {
+        lastSaved = sig; lastSavedAt = t; pendingSince = 0; pendingSource = false;
+        recent.push({ sig, t }); if (recent.length > 16) recent.shift();
+        savedAt.push(t); while (savedAt.length && t - savedAt[0] > 60000) savedAt.shift();
+      },
+      reset() { lastSaved = null; lastSavedAt = 0; lastSig = null; pendingSince = 0; lastQuickAt = 0; lastSource = null; pendingSource = false; recent.length = 0; savedAt.length = 0; },
       /** @returns a reason string when a snapshot should be taken now, else null */
       sample(sig, sourceId, t = now()) {
         const moved = lastSig ? difference(sig, lastSig) : 1;
@@ -58,10 +70,19 @@
         lastSource = sourceId;
         if (!lastSaved) return 'first frame';
         if (pendingSource && t - lastSavedAt >= minGapMs) { pendingSource = false; return 'new source'; }
+        while (savedAt.length && t - savedAt[0] > 60000) savedAt.shift();
+        const busy = savedAt.length >= busyAfter;
         const diff = difference(sig, lastSaved);
         if (diff >= threshold) {
           if (!pendingSince) pendingSince = t;
-          if (moved < threshold / 2 && t - pendingSince >= settleMs && t - lastSavedAt >= minGapMs) return 'screen changed';
+          const still = moved < threshold / 2, gap = t - lastSavedAt;
+          if (!seenLately(sig, t)) {
+            if (busy) { if (gap >= busyEveryMs) return 'screen changed'; }                                          // rationed while the picture keeps changing
+            else if (gap >= minGapMs) {
+              if (still && t - pendingSince >= settleMs) return 'screen changed';                                   // settled: the picture to keep
+              if (!still && t - lastQuickAt >= quickEveryMs) { lastQuickAt = t; return 'screen changed'; }          // first look at a new picture
+            }
+          }
         } else pendingSince = 0;
         if (timerMs && t - lastSavedAt >= timerMs && diff > 0.002) return 'timer';
         return null;

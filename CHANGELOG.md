@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0 (2026-10-22)
+
+The premium pass: the extension now lives inside Meet, and the end of a call takes one click, not one per file.
+
+- **Inside Meet.** A capture button sits in Meet's own bottom bar, next to Chat, sized and shaped like Meet's buttons. It opens a panel docked on the right like Meet's People and Chat panels: the status line, the live transcript with avatars, names and times, snapshot cards in the feed as they are taken, the Snapshot button, the automatic mode, and which video is being snapshotted. It steps aside when you open Meet's own panels and comes back from the button. The panel opens by itself when a call starts (a setting).
+- **The captures page.** A full page of your own, opened from the toolbar icon and, by default, the moment you leave a call: the meetings on the left, the chosen one on the right with who spoke, the snapshots, and the transcript with the snapshots in place. **Open in Claude**, **Copy transcript**, **Download ZIP** (one file), **Save to folder** (Chrome's folder picker once, then one click or, if you turn it on, none), a lightbox with **Copy image** for pasting a snapshot into a chat, rename, delete, search. It follows a live call too.
+- **After the call.** A "Meeting captured" card on Meet's "You left" page with the counts, **Open transcript** and **Open in Claude**. What happens automatically is a setting: open the page (default), save a ZIP, both, or nothing.
+- **Snapshots that keep up.** The shared screen is sampled about once a second instead of every two. A new picture is kept the moment it appears, so a tab you flick past is still there, and again when it settles if it ended up different. A picture seen in the last minute and a half is not kept twice; a video or constant scrolling is rationed to one every fifteen seconds.
+- **Your own share, by itself.** When you're presenting, **Capture my share** in the panel asks Chrome once which window or screen to watch, and from then on snapshots of your share are taken as it changes, like anyone else's.
+- **Gone:** the side panel, the floating pill, the per-file export. The `sidePanel` permission is gone with it; nothing new is asked for.
+- Settings from 1.x are kept. The old "export when I leave" switch becomes "open the meeting page" (or "both" if the ZIP was chosen).
+- 32 unit tests, and an end-to-end run that now checks the button in the bar, the panel, the page that opens on leaving, Open in Claude, the ZIP, the folder save, a rename and a reload mid-call.
+
 ## 1.0.1 (2026-10-21)
 
 Fixes from the first real call.

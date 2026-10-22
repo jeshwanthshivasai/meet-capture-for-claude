@@ -11,107 +11,125 @@ const OUT = path.resolve(process.argv[2] || path.join(os.tmpdir(), 'mcc-e2e'));
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const PANEL = '#meet-capture-panel .panel';
+// Playwright's selectors reach into the panel's shadow root; code run inside the page needs this hand.
+const PANEL_FN = `(() => { const h = document.querySelector('#meet-capture-panel'); return h && h.shadowRoot && h.shadowRoot.querySelector('.panel'); })()`;
+const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!panel) return false; ${body}`);
 
 (async () => {
   const { ctx, sw, extId, errors, downloads } = await launch({ downloads: path.join(OUT, 'downloads') });
   global.__errors = errors;
   sw.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push('worker console: ' + m.text()); });
+  const watch = (p, name) => { p.on('pageerror', (e) => errors.push(`${name}: ${e.message}`)); p.on('console', (m) => { if (m.type() === 'error') errors.push(`${name} console: ${m.text()}`); }); };
 
-  // 1. A call with captions, read by the content script.
+  // 1. A call: the button joins Meet's bar, the panel opens, captions switch on, lines and snapshots arrive.
   const page = await ctx.newPage();
-  page.on('pageerror', (e) => errors.push('page: ' + e.message));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push('page console: ' + m.text()); });
+  watch(page, 'meet');
   await page.goto('https://meet.google.com/abc-defg-hij');
   await page.click('#join');
-  await page.waitForSelector('#meet-capture-pill', { timeout: 8000 });
+  await page.waitForSelector('#meet-capture-button button', { timeout: 8000 });
+  const after = await page.$eval('#meet-capture-button', (el) => el.previousElementSibling && el.previousElementSibling.querySelector('button') && el.previousElementSibling.querySelector('button').getAttribute('aria-label'));
+  console.log('capture button sits after:', after);
+  if (after !== 'Chat with everyone') errors.push('the capture button is not next to the Chat button: ' + after);
+  await page.waitForSelector(`${PANEL}.open`, { timeout: 8000 });
   await page.waitForFunction(() => document.querySelector('#cc').getAttribute('aria-pressed') === 'true', null, { timeout: 8000 });
-  console.log('captions switched on by the extension');
+  console.log('captions switched on by the extension; panel open');
+  await page.waitForFunction(panelFn("return panel.querySelectorAll('.msg').length >= 3;"), null, { timeout: 25000 });
+  await page.waitForFunction(panelFn("return panel.querySelectorAll('.snap').length >= 1;"), null, { timeout: 25000 });
+  const status = await page.$eval(`${PANEL} [data-el="status"]`, (el) => el.textContent);
+  console.log('panel status:', status);
+  if (!/^Capturing · \d+:\d\d · \d+ lines · \d+ snapshots?$/.test(status)) errors.push('unexpected panel status: ' + status);
+  await page.screenshot({ path: path.join(OUT, '1-meet-panel.png') });
 
-  // 2. The side panel, opened as a tab.
-  const panel = await ctx.newPage();
-  panel.on('pageerror', (e) => errors.push('panel: ' + e.message));
-  panel.on('console', (m) => { if (m.type() === 'error') errors.push('panel console: ' + m.text()); });
-  await panel.setViewportSize({ width: 380, height: 900 });
-  await panel.goto(`chrome-extension://${extId}/sidepanel/index.html`);
-  await panel.waitForSelector('.live', { timeout: 8000 });
-  await panel.waitForFunction(() => /\b[3-9]\d* lines|\b\d{2,} lines/.test(document.querySelector('#chip-lines').textContent), null, { timeout: 25000 });
-  await panel.waitForFunction(() => /\b[1-9]\d* snapshots?/.test(document.querySelector('#chip-snaps').textContent), null, { timeout: 25000 });
-  console.log('panel shows:', await panel.textContent('#chip-lines'), '/', await panel.textContent('#chip-snaps'), '/', await panel.textContent('#cc'));
-  await page.bringToFront();
-  await page.screenshot({ path: path.join(OUT, '1-meet-with-pill.png') });
-  await panel.bringToFront();
-  await panel.screenshot({ path: path.join(OUT, '2-panel-live.png'), fullPage: true });
-  await panel.emulateMedia({ colorScheme: 'dark' });
-  await panel.screenshot({ path: path.join(OUT, '2-panel-live-dark.png'), fullPage: true });
-  await panel.emulateMedia({ colorScheme: 'light' });
+  // 2. A manual snapshot from the panel; the mode select writes the setting; Meet's own panels close ours; the bar button reopens it.
+  const count = () => page.$eval(`${PANEL} [data-el="status"]`, (el) => Number(el.textContent.match(/(\d+) snapshot/)[1]));
+  const before = await count();
+  await page.click(`${PANEL} [data-act="snapshot"]`);
+  await page.waitForFunction(panelFn("return Number(panel.querySelector('[data-el=\"status\"]').textContent.match(/(\\d+) snapshot/)[1]) > n;"), before, { timeout: 5000 });
+  console.log('manual snapshot taken from the panel');
+  await page.selectOption(`${PANEL} [data-el="mode"]`, 'both');
+  await sleep(400);
+  const modeSetting = await sw.evaluate(async () => (await chrome.storage.local.get('settings')).settings.snapshotMode);
+  if (modeSetting !== 'both') errors.push('the mode select did not write the setting: ' + modeSetting);
+  await page.selectOption(`${PANEL} [data-el="mode"]`, 'change');
+  const sources = await page.$$eval(`${PANEL} [data-el="sources"] option`, (els) => els.map((o) => o.textContent));
+  console.log('source picker:', sources.join(' | '));
+  if (!sources.some((s) => /presenting/.test(s))) errors.push('the presentation video was not recognised as a source');
+  await page.click('button[aria-label="Chat with everyone"]');
+  await page.waitForFunction(panelFn("return !panel.classList.contains('open');"), null, { timeout: 3000 });
+  await page.click('#meet-capture-button button');
+  await page.waitForSelector(`${PANEL}.open`, { timeout: 3000 });
+  console.log('panel closes for Meet\'s chat and reopens from the bar button');
 
-  // 3. A manual snapshot from the panel, the source picker, the settings view.
-  const before = Number((await panel.textContent('#chip-snaps')).match(/\d+/)[0]);
-  await panel.click('[data-action="snapshot"]');
-  await panel.waitForFunction((n) => Number(document.querySelector('#chip-snaps').textContent.match(/\d+/)[0]) > n, before, { timeout: 5000 });
-  console.log('manual snapshot taken');
-  await panel.click('[data-action="change-source"]');
-  await panel.waitForSelector('.pick', { timeout: 5000 });
-  const picks = await panel.$$eval('.pick li', (els) => els.map((e) => e.textContent.trim().replace(/\s+/g, ' ')));
-  console.log('source picker:', picks.join(' | '));
-  if (!picks.some((p) => /presenting/.test(p))) errors.push('the presentation video was not recognised in the picker');
-  await panel.screenshot({ path: path.join(OUT, '3-panel-picker.png'), fullPage: true });
-  await panel.click('[data-action="cancel-source"]');
-  await panel.click('#settings-btn');
-  await panel.waitForSelector('.settings', { timeout: 3000 });
-  await panel.fill('#preface', 'Summarise the decisions and list action items with owners.');
-  await sleep(600);
-  await panel.screenshot({ path: path.join(OUT, '4-panel-settings.png'), fullPage: true });
-  await panel.click('[data-action="close-settings"]');
-  await panel.waitForSelector('.live', { timeout: 3000 });
-
-  // 4. Leave the call: the export runs by itself.
+  // 3. Leave the call: the captures page opens by itself on this meeting; a card stays on Meet's "You left" page.
   await page.waitForFunction(() => window.__fake && window.__fake.done, null, { timeout: 30000 }); // the caption timeline is over
   await sleep(1500);
-  await page.bringToFront();
+  const appPromise = ctx.waitForEvent('page', { timeout: 15000 });
   await page.click('#leave');
-  await panel.bringToFront();
-  await panel.waitForSelector('.list li', { timeout: 15000 });
-  const items = await waitForDownloads(sw, 2, 30000);
-  console.log('downloads:', items.map((d) => `${path.basename(d.filename)} (${d.state}, ${d.totalBytes} B)`).join(', '));
-  await sleep(500);
-  await panel.screenshot({ path: path.join(OUT, '5-panel-after.png'), fullPage: true });
-  const md = items.find((d) => /transcript\.md$/.test(d.filename) || d.mime === 'text/markdown');
-  if (!md) errors.push('no transcript.md was downloaded');
-  else {
-    const text = fs.readFileSync(md.filename, 'utf8');
-    fs.writeFileSync(path.join(OUT, 'transcript.md'), text);
-    console.log('--- transcript.md ---\n' + text + '--- end ---');
-    const expectOnce = (s) => { const n = text.split(s).length - 1; if (n !== 1) errors.push(`expected exactly once in transcript: "${s}" (found ${n})`); };
-    expectOnce('Hi everyone, thanks for joining today. Let me share the design rules we agreed on last week and the agenda');
-    expectOnce('Sounds good, go ahead. Yes it is out');
-    expectOnce('One question first: is the generic layout out for good?');
-    expectOnce('Great, moving on to the agenda for today');
-    expectOnce('Hi, how are you?');
-    expectOnce('Jesh Shiva:** So I have been looking into these things lately over the weekend and I think we can connect');
-    if (/Hi, how are you\? So I have been/.test(text)) errors.push('the long block was not cut into two lines at the pause');
-    if (!/\*\*\[\d\d:\d\d:\d\d\] Jesh Shiva:\*\* Sounds good/.test(text)) errors.push('"You" was not replaced by the name from the self tile');
-    if (!text.includes('📷 Snapshot 1')) errors.push('no snapshot marker in the transcript');
-    if (!text.includes('## For Claude')) errors.push('the preface is missing');
-    if (!/Participants who spoke: Priya Natarajan, Jesh Shiva, Sam Okafor/.test(text)) errors.push('participants line is wrong');
-    if (!text.includes('Priya Natarajan is presenting')) errors.push('the snapshot source label is missing');
-  }
-  for (const d of items.filter((x) => /\.png$/.test(x.filename) || x.mime === 'image/png')) {
-    const head = fs.readFileSync(d.filename).subarray(0, 8);
-    if (head.toString('hex') !== '89504e470d0a1a0a') errors.push('not a PNG: ' + d.filename);
-    fs.copyFileSync(d.filename, path.join(OUT, path.basename(d.filename)));
-  }
-  const rec = (await sw.evaluate(() => MCC.store.listMeetings()))[0];
-  console.log('export folder:', rec.exportFolder, '| files:', (rec.exportFiles || []).join(', '), '| title:', rec.title);
-  if (!/^Meet captures\/\d{4}-\d\d-\d\d \d\d\.\d\d Weekly design sync$/.test(rec.exportFolder || '')) errors.push('unexpected export folder name: ' + rec.exportFolder);
-  // Playwright renames files it intercepts, so the on-disk name is not checked here; the intended path is in the record.
+  const app = await appPromise;
+  watch(app, 'app');
+  await app.waitForLoadState();
+  console.log('captures page opened at:', app.url().replace(/^chrome-extension:\/\/[a-z]+/, ''));
+  if (!/\/app\/index\.html#m=abc-defg-hij-/.test(app.url())) errors.push('the captures page did not open on the meeting: ' + app.url());
+  await page.waitForSelector('#meet-capture-after .card', { timeout: 8000 });
+  const cardText = await page.$eval('#meet-capture-after .card', (el) => el.textContent.replace(/\s+/g, ' ').trim());
+  console.log('card on the left page:', cardText);
+  if (!/Meeting captured/.test(cardText)) errors.push('no "Meeting captured" card after the call');
+  await page.screenshot({ path: path.join(OUT, '2-meet-left-card.png') });
+  await app.bringToFront();
+  await app.waitForSelector('.tl .entry', { timeout: 15000 });
+  await app.waitForFunction(() => !document.querySelector('.meta .live'), null, { timeout: 15000 });
+  await app.waitForSelector('.strip .thumb', { timeout: 5000 });
+  await sleep(400);
+  await app.screenshot({ path: path.join(OUT, '3-app-meeting.png'), fullPage: true });
+  const n = await app.$$eval('.tl .entry .text', (els) => els.length);
+  const thumbs = await app.$$eval('.strip .thumb', (els) => els.length);
+  console.log('captures page shows', n, 'lines and', thumbs, 'snapshots');
 
-  // 5. Export again as one ZIP with a name set in the settings, then copy the transcript.
-  await sw.evaluate(async () => { const { settings } = await chrome.storage.local.get('settings'); await chrome.storage.local.set({ settings: { ...settings, exportFormat: 'zip', includeJson: true, myName: 'Jesh' } }); });
-  await sleep(300);
-  await panel.click('.list li [data-action="export"]');
-  const zipItems = await waitForDownloads(sw, items.length + 1, 30000);
-  const zip = zipItems.find((d) => /\.zip$/.test(d.filename) || d.mime === 'application/zip');
+  // 4. Copy the transcript and check it.
+  await app.evaluate(() => { window.__copied = ''; navigator.clipboard.writeText = async (t) => { window.__copied = t; }; });
+  await app.click('[data-act="copy"]');
+  await app.waitForFunction(() => window.__copied, null, { timeout: 5000 });
+  const text = await app.evaluate(() => window.__copied);
+  fs.writeFileSync(path.join(OUT, 'transcript.md'), text);
+  console.log('--- transcript.md ---\n' + text + '--- end ---');
+  const expectOnce = (s) => { const c = text.split(s).length - 1; if (c !== 1) errors.push(`expected exactly once in transcript: "${s}" (found ${c})`); };
+  expectOnce('Hi everyone, thanks for joining today. Let me share the design rules we agreed on last week and the agenda');
+  expectOnce('Sounds good, go ahead. Yes it is out');
+  expectOnce('One question first: is the generic layout out for good?');
+  expectOnce('Great, moving on to the agenda for today');
+  expectOnce('Hi, how are you?');
+  expectOnce('Jesh Shiva:** So I have been looking into these things lately over the weekend and I think we can connect');
+  if (/Hi, how are you\? So I have been/.test(text)) errors.push('the long block was not cut into two lines at the pause');
+  if (!/\*\*\[\d\d:\d\d:\d\d\] Jesh Shiva:\*\* Sounds good/.test(text)) errors.push('"You" was not replaced by the name from the self tile');
+  if (!text.includes('📷 Snapshot 1')) errors.push('no snapshot marker in the transcript');
+  if (!/Participants who spoke: Priya Natarajan, Jesh Shiva, Sam Okafor/.test(text)) errors.push('participants line is wrong');
+  if (!text.includes('Priya Natarajan is presenting')) errors.push('the snapshot source label is missing');
+
+  // 5. Open in Claude: a claude.ai tab with the transcript in the URL.
+  const claudePromise = ctx.waitForEvent('page', { timeout: 10000 });
+  await app.click('[data-act="claude"]');
+  const claude = await claudePromise;
+  await claude.waitForLoadState();
+  const q = new URL(claude.url());
+  console.log('Claude opened:', q.origin + q.pathname, '· prefill', (q.searchParams.get('q') || '').length, 'characters');
+  if (q.origin !== 'https://claude.ai' || !(q.searchParams.get('q') || '').startsWith('# Weekly design sync')) errors.push('Open in Claude did not open claude.ai with the transcript: ' + claude.url());
+  await claude.close();
+
+  // 6. One ZIP from the page, with a name set in the settings and meeting.json on.
+  await app.click('#settings-btn');
+  await app.waitForSelector('#settings-form', { timeout: 3000 });
+  await app.fill('#s-myName', 'Jesh');
+  await app.check('input[name="includeJson"]');
+  await app.fill('#s-preface', 'Summarise the decisions and list action items with owners.');
+  await sleep(700);
+  await app.screenshot({ path: path.join(OUT, '4-app-settings.png') });
+  await app.click('#settings-form .buttons .btn');
+  await app.waitForFunction(() => !document.querySelector('#settings').open, null, { timeout: 3000 });
+  await app.click('[data-act="zip"]');
+  const items = await waitForDownloads(sw, 1, 30000);
+  const zip = items.find((d) => /\.zip$/.test(d.filename) || d.mime === 'application/zip');
+  console.log('downloads:', items.map((d) => `${path.basename(d.filename)} (${d.state}, ${d.totalBytes} B)`).join(', '));
   if (!zip) errors.push('no ZIP was downloaded');
   else {
     const unz = path.join(OUT, 'unzipped'); fs.mkdirSync(unz, { recursive: true });
@@ -119,38 +137,73 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const listing = execFileSync('find', ['.', '-type', 'f'], { cwd: unz }).toString().trim().split('\n').sort();
     console.log('zip:', path.basename(zip.filename), '\n ' + listing.join('\n '));
     if (!listing.some((f) => /meeting\.json$/.test(f))) errors.push('meeting.json missing from the ZIP');
+    if (!listing.some((f) => /snapshot-01\.png$/.test(f))) errors.push('snapshot-01.png missing from the ZIP');
+    if (!listing.some((f) => /\/\d{4}-\d\d-\d\d \d\d\.\d\d Weekly design sync\//.test(f))) errors.push('the ZIP folder is not named after the meeting');
     const mdIn = listing.find((f) => /transcript\.md$/.test(f));
     if (!mdIn) errors.push('transcript.md missing from the ZIP');
     else {
       const t2 = fs.readFileSync(path.join(unz, mdIn), 'utf8');
       if (!/\*\*\[\d\d:\d\d:\d\d\] Jesh:\*\* Sounds good/.test(t2)) errors.push('the name from the settings was not applied to the ZIP transcript');
       if (t2.includes('Jesh Shiva')) errors.push('the self-tile name still appears after a rename in the settings');
-      const jIn = listing.find((f) => /meeting\.json$/.test(f));
-      if (jIn && !JSON.parse(fs.readFileSync(path.join(unz, jIn), 'utf8')).lines.some((l) => l.speaker === 'Jesh')) errors.push('meeting.json does not use the renamed speaker');
+      if (!t2.includes('## For Claude')) errors.push('the preface is missing from the ZIP transcript');
+      const png = listing.find((f) => /snapshot-01\.png$/.test(f));
+      if (png) { const head = fs.readFileSync(path.join(unz, png)).subarray(0, 8); if (head.toString('hex') !== '89504e470d0a1a0a') errors.push('snapshot-01.png is not a PNG'); fs.copyFileSync(path.join(unz, png), path.join(OUT, 'snapshot-01.png')); }
     }
   }
-  await panel.evaluate(() => { window.__copied = ''; navigator.clipboard.writeText = async (t) => { window.__copied = t; }; });
-  await panel.click('.list li [data-action="copy"]');
-  await panel.waitForFunction(() => window.__copied, null, { timeout: 5000 });
-  const clip = await panel.evaluate(() => window.__copied);
-  console.log('copied transcript:', clip.length, 'characters;', await panel.textContent('#toast'));
-  if (!/^# Weekly design sync/.test(clip)) errors.push('the copied text is not the transcript');
-  if (!clip.includes('] Jesh:** Sounds good')) errors.push('the copied transcript does not use the renamed speaker');
+  const rec = (await sw.evaluate(() => MCC.store.listMeetings()))[0];
+  console.log('record: zip', rec.zipFile, '| title:', rec.title, '| status:', rec.status);
+  if (!/^Meet captures\/\d{4}-\d\d-\d\d \d\d\.\d\d Weekly design sync\.zip$/.test(rec.zipFile || '')) errors.push('unexpected ZIP name: ' + rec.zipFile);
 
-  // 6. A reload mid-call continues the same meeting instead of starting a second one.
+  // 7. Save to a folder: one picker, every file written, remembered on the record.
+  await app.click('[data-act="folder"]');
+  await app.waitForFunction(() => window.__fsFiles && window.__fsFiles.length >= 3, null, { timeout: 10000 });
+  const written = await app.evaluate(() => window.__fsFiles.map((f) => `${f.path} (${f.size} B)`));
+  console.log('written to the folder:\n ' + written.join('\n '));
+  if (!written.some((f) => /Meet captures\/\d{4}-\d\d-\d\d \d\d\.\d\d Weekly design sync\/transcript\.md/.test(f))) errors.push('transcript.md was not written into the folder');
+  if (!written.some((f) => /snapshot-01\.png/.test(f))) errors.push('snapshot-01.png was not written into the folder');
+  await app.waitForFunction(() => /Saved to Meet captures/.test(document.querySelector('.note') ? document.querySelector('.note').textContent : ''), null, { timeout: 5000 });
+  const folderBtn = await app.$eval('[data-act="folder"]', (el) => el.textContent.trim());
+  console.log('folder button now says:', folderBtn);
+  if (folderBtn !== 'Save to Meet captures') errors.push('the folder button does not show the chosen folder: ' + folderBtn);
+
+  // 8. The lightbox and a rename.
+  await app.click('.strip .thumb');
+  await app.waitForSelector('#lightbox[open] img', { timeout: 3000 });
+  await app.waitForFunction(() => /^blob:/.test(document.querySelector('#lightbox img').src), null, { timeout: 5000 });
+  await app.screenshot({ path: path.join(OUT, '5-app-lightbox.png') });
+  await app.keyboard.press('Escape');
+  await app.dblclick('#title');
+  await app.fill('.title-edit', 'Design sync · renamed');
+  await app.keyboard.press('Enter');
+  await app.waitForFunction(() => document.querySelector('#title') && document.querySelector('#title').textContent === 'Design sync · renamed', null, { timeout: 3000 });
+  await sleep(500);
+  const renamed = await sw.evaluate(async () => (await MCC.store.listMeetings())[0].title);
+  if (renamed !== 'Design sync · renamed') errors.push('the rename was not stored: ' + renamed);
+  const listTitle = await app.$eval('.list .item.active .t span', (el) => el.textContent);
+  if (listTitle !== 'Design sync · renamed') errors.push('the list does not show the new title: ' + listTitle);
+  console.log('renamed to:', renamed);
+
+  // 9. A reload mid-call continues the same meeting instead of starting a second one; the page follows the live call.
   await page.bringToFront();
   await page.click('#rejoin');
-  await page.waitForSelector('#meet-capture-pill', { timeout: 8000 });
+  await page.waitForSelector(`${PANEL}.open`, { timeout: 8000 });
   await sleep(2500);
   const n1 = (await sw.evaluate(() => MCC.store.listMeetings())).length;
   await page.reload();
   await page.click('#join');
-  await page.waitForSelector('#meet-capture-pill', { timeout: 8000 });
+  await page.waitForSelector(`${PANEL}.open`, { timeout: 8000 });
   await sleep(2500);
-  const after = await sw.evaluate(() => MCC.store.listMeetings());
-  console.log('meetings after a reload mid-call:', after.length, '(before reload:', n1 + ')');
-  if (after.length !== n1) errors.push('a reload mid-call started a new meeting record');
-  if (after.filter((m) => m.status === 'live').length !== 1) errors.push('expected exactly one live meeting after the reload');
+  const afterReload = await sw.evaluate(() => MCC.store.listMeetings());
+  console.log('meetings after a reload mid-call:', afterReload.length, '(before reload:', n1 + ')');
+  if (afterReload.length !== n1) errors.push('a reload mid-call started a new meeting record');
+  if (afterReload.filter((m) => m.status === 'live').length !== 1) errors.push('expected exactly one live meeting after the reload');
+  await app.bringToFront();
+  await app.waitForSelector('.list .live-dot', { timeout: 5000 });
+  await app.click('.list .item:has(.live-dot)');
+  await app.waitForSelector('.meta .live', { timeout: 5000 });
+  await app.waitForFunction(() => document.querySelectorAll('.tl .entry').length >= 1, null, { timeout: 25000 });
+  await app.screenshot({ path: path.join(OUT, '6-app-live.png') });
+  console.log('the captures page follows the live call');
   await page.click('#leave');
   await sleep(2500);
 

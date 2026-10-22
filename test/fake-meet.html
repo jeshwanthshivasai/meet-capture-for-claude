@@ -5,21 +5,27 @@
 <title>Meet – {{CODE}}</title>
 <style>
   body { margin: 0; background: #202124; color: #e8eaed; font: 14px/1.4 "Google Sans", Roboto, Arial, sans-serif; height: 100vh; display: flex; flex-direction: column; }
+  #app { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .lobby { margin: auto; text-align: center; }
   .lobby h1 { font-weight: 400; font-size: 28px; }
   .lobby button, .bar button, .left button { font: inherit; }
   .join { background: #8ab4f8; color: #202124; border: 0; border-radius: 24px; padding: 12px 24px; font-weight: 500; cursor: pointer; }
-  .stage { flex: 1; display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; padding: 16px 16px 0; }
+  .stage { flex: 1; min-height: 0; display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; padding: 16px 16px 0; }
   .tile { position: relative; background: #3c4043; border-radius: 12px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
   .tile video { width: 100%; height: 100%; object-fit: cover; }
   .tile.big { grid-row: 1 / 3; }
   .tile .name { position: absolute; left: 12px; bottom: 10px; background: rgba(0,0,0,.45); padding: 4px 8px; border-radius: 6px; font-size: 13px; }
-  .bar { display: flex; justify-content: center; gap: 10px; padding: 14px; }
+  .bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 14px 16px; }
+  .bar .mid { display: flex; justify-content: center; gap: 10px; }
+  .bar .right { display: flex; justify-content: flex-end; gap: 4px; }
+  .bar .right > div { display: inline-flex; margin: 0 2px; }
   .bar button { width: 48px; height: 48px; border-radius: 50%; border: 0; background: #3c4043; color: #e8eaed; cursor: pointer; }
+  .bar .right button { width: 40px; height: 40px; background: transparent; color: #e3e3e3; }
+  .bar .right button:hover { background: rgba(232,234,237,.1); }
   .bar button#leave { background: #ea4335; width: 64px; }
   .bar button[aria-pressed="true"] { background: #8ab4f8; color: #202124; }
+  .bar .time { color: #e3e3e3; font-size: 15px; }
   .google-symbols { font-family: monospace; font-size: 11px; }
-  .footer { position: fixed; left: 16px; bottom: 22px; font-size: 14px; }
   .iOzk7 { position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%); width: 640px; max-height: 140px; overflow: hidden; }
   .vNKgIf { display: flex; flex-direction: column; gap: 8px; }
   .nMcdL { display: flex; gap: 10px; align-items: flex-start; }
@@ -79,12 +85,21 @@
         <div class="tile" data-participant-id="spaces/x/devices/self"><video id="selfcam" autoplay muted playsinline style="transform:scaleX(-1)"></video><div class="name"><span data-self-name="Jesh Shiva">You</span></div></div>
       </div>
       <div class="bar">
-        <button aria-label="Turn off microphone (ctrl + d)"><i class="google-symbols">mic</i></button>
-        <button aria-label="Turn off camera (ctrl + e)"><i class="google-symbols">videocam</i></button>
-        <button id="cc" aria-label="Turn on captions (c)" aria-pressed="false"><i class="google-symbols">closed_caption_off</i></button>
-        <button id="leave" aria-label="Leave call"><i class="google-symbols">call_end</i></button>
+        <div class="time"><span id="clock">15:30</span> · <span class="u6vdEc">${esc(CODE)}</span></div>
+        <div class="mid">
+          <button aria-label="Turn off microphone (ctrl + d)"><i class="google-symbols">mic</i></button>
+          <button aria-label="Turn off camera (ctrl + e)"><i class="google-symbols">videocam</i></button>
+          <button id="cc" aria-label="Turn on captions (c)" aria-pressed="false"><i class="google-symbols">closed_caption_off</i></button>
+          <button id="present" aria-label="Present now"><i class="google-symbols">present_to_all</i></button>
+          <button id="leave" aria-label="Leave call"><i class="google-symbols">call_end</i></button>
+        </div>
+        <div class="right">
+          <div><button aria-label="Meeting details"><i class="google-symbols">info</i></button></div>
+          <div><button aria-label="Show everyone"><i class="google-symbols">people</i></button></div>
+          <div><button aria-label="Chat with everyone"><i class="google-symbols">chat</i></button></div>
+          <div><button aria-label="Activities"><i class="google-symbols">shapes</i></button></div>
+        </div>
       </div>
-      <div class="footer"><span class="u6vdEc">${esc(CODE)}</span></div>
       <div jsname="dsyhDe" class="iOzk7" id="ccwrap" hidden><div tabindex="0" role="region" aria-label="Captions" class="vNKgIf UDinHf" id="region"></div></div>`;
     document.getElementById('cam2').srcObject = cameraStream(200);
     document.getElementById('selfcam').srcObject = cameraStream(30);

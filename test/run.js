@@ -103,21 +103,44 @@ test('transcript: changed flag and timestamps', () => {
 
 // ------------------------------------------------------------------ change detector
 const sig = (fn) => { const a = new Uint8Array(M.SIG_W * M.SIG_H); for (let i = 0; i < a.length; i++) a[i] = fn(i); return a; };
-const A = sig((i) => (i * 7) % 256), B = sig((i) => (i * 13 + 90) % 256), Bish = sig((i) => (i * 13 + 90) % 256 + (i % 50 === 0 ? 20 : 0)), BLANK = sig(() => 40);
-test('detector: first frame, then a changed and settled screen, then a timer', () => {
-  const d = M.createChangeDetector({ threshold: 0.035, settleMs: 1500, minGapMs: 4000, timerMs: 10000 });
+const A = sig((i) => (i * 7) % 256), B = sig((i) => (i * 13 + 90) % 256), C = sig((i) => (i * 31 + 5) % 256), D = sig((i) => (i * 53 + 200) % 256), BLANK = sig(() => 40);
+test('detector: a new picture is kept at first sight, then once more when it has settled', () => {
+  const d = M.createChangeDetector({ threshold: 0.035, settleMs: 1500, minGapMs: 1200, quickEveryMs: 2500, timerMs: 0 });
   assert.strictEqual(d.sample(BLANK, 'v1', 0), null, 'blank frames never count');
   assert.strictEqual(d.sample(A, 'v1', 2000), 'first frame');
   d.saved(A, 2000);
   assert.strictEqual(d.sample(A, 'v1', 4000), null);
-  assert.strictEqual(d.sample(B, 'v1', 6000), null, 'still moving');
-  assert.strictEqual(d.sample(B, 'v1', 8000), 'screen changed');
-  d.saved(B, 8000);
-  assert.strictEqual(d.sample(B, 'v1', 10000), null);
-  assert.strictEqual(d.sample(Bish, 'v1', 18500), 'timer');
-  d.saved(Bish, 18500);
-  assert.strictEqual(d.sample(Bish, 'v2', 20000), null, 'new source but too soon');
-  assert.strictEqual(d.sample(Bish, 'v2', 23000), 'new source');
+  assert.strictEqual(d.sample(B, 'v1', 6000), 'screen changed', 'kept the moment it appears');
+  d.saved(B, 6000);
+  assert.strictEqual(d.sample(B, 'v1', 7000), null, 'settled on the same picture: nothing new to keep');
+  assert.strictEqual(d.sample(C, 'v1', 8000), null, 'moving: the quick look is rationed to one per 2.5 s');
+  assert.strictEqual(d.sample(C, 'v1', 9000), null, 'not settled yet');
+  assert.strictEqual(d.sample(C, 'v1', 9500), 'screen changed', 'settled on a picture that was never kept');
+  d.saved(C, 9500);
+  assert.strictEqual(d.sample(D, 'v1', 10500), null, 'moving, and too soon after the last one');
+  assert.strictEqual(d.sample(C, 'v1', 11200), null, 'back to the picture kept a moment ago');
+  assert.strictEqual(d.sample(D, 'v1', 12000), 'screen changed', 'a new picture, kept at first sight');
+  d.saved(D, 12000);
+});
+test('detector: a picture kept a moment ago is not kept again, a new source is, a timer adds more', () => {
+  const d = M.createChangeDetector({ threshold: 0.035, settleMs: 1000, minGapMs: 1200, quickEveryMs: 1000, timerMs: 10000, dupeWindowMs: 60000 });
+  assert.strictEqual(d.sample(A, 'v1', 1000), 'first frame'); d.saved(A, 1000);
+  assert.strictEqual(d.sample(B, 'v1', 3000), 'screen changed'); d.saved(B, 3000);
+  assert.strictEqual(d.sample(A, 'v1', 5000), null, 'back to a slide seen 4 s ago');
+  assert.strictEqual(d.sample(A, 'v1', 6000), null, 'still that slide, settled');
+  assert.strictEqual(d.sample(A, 'v1', 13000), 'timer', 'the timer still fires on it');
+  d.saved(A, 13000);
+  assert.strictEqual(d.sample(A, 'v2', 13500), null, 'new source, too soon after a save');
+  assert.strictEqual(d.sample(A, 'v2', 14300), 'new source');
+  d.saved(A, 14300);
+  assert.strictEqual(d.sample(B, 'v2', 70000), 'screen changed', 'the same slide again, long after: kept');
+});
+test('detector: a picture that keeps changing (video, scrolling) is kept only every so often', () => {
+  const d = M.createChangeDetector({ threshold: 0.035, settleMs: 1000, minGapMs: 1000, quickEveryMs: 1000, timerMs: 0, busyAfter: 3, busyEveryMs: 5000 });
+  const frames = [A, B, C, D, A, B, C, D, A, B];
+  let t = 1000, kept = [];
+  for (const f of frames) { const r = d.sample(f, 'v1', t); if (r) { kept.push(t); d.saved(f, t); } t += 1000; }
+  assert.deepStrictEqual(kept, [1000, 2000, 3000, 8000], 'three quick ones, then one every 5 s');
 });
 test('detector: difference and blank', () => {
   assert.strictEqual(M.difference(A, A), 0);
@@ -229,11 +252,13 @@ test('names: fileSafe, folderName, snapshotFile', () => {
   assert.strictEqual(M.snapshotFile(12, 'png'), 'snapshot-12.png');
 });
 test('settings: defaults win over wrong types, speaker alias', () => {
-  const s = M.settingsWithDefaults({ myName: 'Jesh', snapshotEverySec: 'ten', autoExport: false, extra: 1 });
+  const s = M.settingsWithDefaults({ myName: 'Jesh', snapshotEverySec: 'ten', afterCall: 'zip', openPanel: false, extra: 1 });
   assert.strictEqual(s.myName, 'Jesh');
   assert.strictEqual(s.snapshotEverySec, 60);
-  assert.strictEqual(s.autoExport, false);
+  assert.strictEqual(s.afterCall, 'zip');
+  assert.strictEqual(s.openPanel, false);
   assert.strictEqual(s.extra, undefined);
+  assert.strictEqual(M.settingsWithDefaults(null).afterCall, 'open');
   assert.strictEqual(M.speakerAlias('You', 'Jesh'), 'Jesh');
   assert.strictEqual(M.speakerAlias('Vous', 'Jesh'), 'Jesh');
   assert.strictEqual(M.speakerAlias('You', ''), 'You');

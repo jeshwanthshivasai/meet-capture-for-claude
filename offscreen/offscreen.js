@@ -1,5 +1,5 @@
-// Builds the export files for one meeting from IndexedDB and returns object URLs for the service worker
-// to download. It only answers messages addressed to it and releases the URLs when told to.
+// Builds the ZIP for one meeting from IndexedDB and returns an object URL for the service worker to
+// download. It only answers messages addressed to it and releases the URL when told to.
 chrome.runtime.onMessage.addListener((m, sender, reply) => {
   if (!m || m.target !== 'offscreen') return false;
   if (m.type === 'build') {
@@ -18,13 +18,6 @@ async function build({ meetingId, settings }) {
   const meeting = await S.getMeeting(meetingId);
   if (!meeting) throw new Error('That meeting is no longer stored.');
   const [lines, snapshots] = await Promise.all([S.getLines(meetingId), S.getSnapshots(meetingId, { withData: true })]);
-  const files = MCC.exportFiles({ meeting, lines, snapshots, settings });
-  const folder = MCC.folderName(meeting);
-  const base = folder.split('/').pop();
-  if (settings && settings.exportFormat === 'zip') {
-    const chunks = MCC.makeZip(files.map((f) => ({ path: `${base}/${f.name}`, data: f.data })));
-    const blob = new Blob(chunks, { type: 'application/zip' });
-    return { folder, files: [{ url: URL.createObjectURL(blob), filename: `${folder}.zip`, size: blob.size }] };
-  }
-  return { folder, files: files.map((f) => { const blob = new Blob([f.data], { type: f.mime }); return { url: URL.createObjectURL(blob), filename: `${folder}/${f.name}`, size: blob.size }; }) };
+  const { blob, filename } = MCC.zipExport({ meeting, lines, snapshots, settings });
+  return { url: URL.createObjectURL(blob), filename, size: blob.size };
 }

@@ -1,25 +1,26 @@
 // Shared constants and small helpers. Loaded by the content script, the service worker (importScripts),
-// the side panel and the offscreen page. No chrome.* calls here, so it also runs in Node for the tests.
+// the captures page and the offscreen page. No chrome.* calls here, so it also runs in Node for the tests.
 (function (root) {
   const NS = (root.MCC = root.MCC || {});
 
   NS.DEFAULT_SETTINGS = {
     myName: '',                   // shown instead of "You" in transcripts
     autoCaptions: true,           // turn Meet's captions on when a call starts
-    autoExport: true,             // export the moment you leave a call
-    exportFormat: 'files',        // 'files': Markdown + images in a folder · 'zip': one ZIP
-    includeJson: false,           // add meeting.json with the raw data
-    openClaude: false,            // open claude.ai with the transcript after an export
+    afterCall: 'open',            // when you leave: 'open' the meeting page · 'zip' one ZIP to Downloads · 'both' · 'nothing'
+    includeJson: false,           // add meeting.json with the raw data to exports
+    openClaude: false,            // also open claude.ai with the transcript when the call ends
     preface: '',                  // text placed at the top of the transcript, for Claude
     snapshotMode: 'change',       // 'change' | 'timer' | 'both' | 'manual'
     snapshotEverySec: 60,         // timer interval
     snapshotSensitivity: 'normal',// 'low' | 'normal' | 'high'
     snapshotFormat: 'png',        // 'png' | 'jpeg'
     snapshotMaxWidth: 1600,       // longest side of a saved snapshot
-    showPill: true,               // the small status pill on the Meet page
+    openPanel: true,              // open the capture panel inside Meet when a call starts
+    autoFolder: false,            // after a call, also write the files into the folder chosen on the captures page
     keepDays: 30,                 // delete captured meetings after this many days; 0 keeps them
     debug: false,
   };
+  NS.AFTER_CALL = ['open', 'zip', 'both', 'nothing'];
 
   NS.THRESHOLDS = { low: 0.08, normal: 0.035, high: 0.015 };
 

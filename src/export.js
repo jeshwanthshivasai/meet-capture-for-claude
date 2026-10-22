@@ -97,5 +97,14 @@
     return files;
   }
 
-  Object.assign(NS, { buildMarkdown, buildJson, exportFiles, tidyLines, participants, withNames, selfName, titleOf, byTime });
+  /** The export as one ZIP: { blob, filename } with the files inside a folder named after the meeting. */
+  function zipExport({ meeting, lines, snapshots, settings }) {
+    const files = exportFiles({ meeting, lines, snapshots, settings });
+    const folder = NS.folderName(meeting);
+    const base = folder.split('/').pop();
+    const chunks = NS.makeZip(files.map((f) => ({ path: `${base}/${f.name}`, data: f.data })));
+    return { blob: new Blob(chunks, { type: 'application/zip' }), filename: `${folder}.zip`, folder: base, files };
+  }
+
+  Object.assign(NS, { buildMarkdown, buildJson, exportFiles, zipExport, tidyLines, participants, withNames, selfName, titleOf, byTime });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

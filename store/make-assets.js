@@ -47,16 +47,15 @@ function shot({ title, sub, layout, art }) {
   ${art}</body></html>`;
 }
 
-// A plain browser window around a captured page, with the side panel docked on the right.
-function browserFrame(pageImg, panelImg, w, scale, address, offset = 0, height = 0) {
-  const clip = height ? `height:${height}px;overflow:hidden` : '';
-  return `<div class="frame" style="width:${w}px;background:#202124">
+// A plain browser window around a captured page.
+function frame(img, w, address, extra = '') {
+  return `<div class="frame" style="width:${w}px;background:#202124;${extra}">
     <div style="height:40px;display:flex;align-items:center;gap:9px;padding:0 14px;background:#2B2C30">
       <i style="width:11px;height:11px;border-radius:50%;background:#FF5F57"></i><i style="width:11px;height:11px;border-radius:50%;background:#FEBC2E"></i><i style="width:11px;height:11px;border-radius:50%;background:#28C840"></i>
       <span style="margin-left:12px;flex:1;height:26px;border-radius:13px;background:#1D1E21;color:#C8CBD2;font-size:13px;display:flex;align-items:center;padding:0 12px">${address}</span>
       <span style="width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:rgba(76,201,168,.16);box-shadow:0 0 0 2px rgba(76,201,168,.45)">${iconSvg(20, 0)}</span>
     </div>
-    <div style="display:flex;${clip}">${pageImg ? `<img src="${url(pageImg)}" style="width:${1000 * scale}px;display:block"><div style="width:1px;background:#3C3C3C"></div>` : ''}<img src="${url(panelImg)}" style="width:${380 * scale}px;display:block;margin-top:-${Math.round(offset * scale)}px"></div>
+    <img src="${url(img)}" style="width:${w}px;display:block">
   </div>`;
 }
 
@@ -66,35 +65,50 @@ const ICON = {
   mic: '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11z"/>',
   cam: '<path d="M15 8v8H5V8h10m1-2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4V7a1 1 0 0 0-1-1z"/>',
   cc: '<path d="M19 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm-8 7H9.5v-.5h-2v3h2V13H11v1a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1zm7 0h-1.5v-.5h-2v3h2V13H18v1a1 1 0 0 1-1 1h-3a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1z"/>',
+  present: '<path d="M21 3H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm0 14H3V5h18v12zM11 16h2v-4h3l-4-4-4 4h3z"/>',
   end: '<path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08a.996.996 0 0 1 0-1.41C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.5-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z"/>',
+  info: '<path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z"/>',
+  people: '<path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5C15 14.17 10.33 13 8 13zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>',
+  chat: '<path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm0 14H5.17L4 17.17V4h16v12z"/>',
+  shapes: '<path d="M11 13v8H3v-8h8zm10-1a5 5 0 1 1-10 0 5 5 0 0 1 10 0zM13 2l5 8H8l5-8z"/>',
 };
 const svgUrl = (p, fill) => `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='${fill}'>${p}</svg>`)}")`;
 async function storeLook(page) {
   await page.addStyleTag({ content: `
     .google-symbols{font-size:0}
     .bar button{background-repeat:no-repeat;background-position:center;background-size:24px}
-    .bar button:nth-child(1){background-image:${svgUrl(ICON.mic, '#e8eaed')}}
-    .bar button:nth-child(2){background-image:${svgUrl(ICON.cam, '#e8eaed')}}
+    .bar .mid button:nth-child(1){background-image:${svgUrl(ICON.mic, '#e8eaed')}}
+    .bar .mid button:nth-child(2){background-image:${svgUrl(ICON.cam, '#e8eaed')}}
     .bar button#cc{background-image:${svgUrl(ICON.cc, '#e8eaed')}}
     .bar button#cc[aria-pressed="true"]{background-image:${svgUrl(ICON.cc, '#202124')}}
+    .bar button#present{background-image:${svgUrl(ICON.present, '#e8eaed')}}
     .bar button#leave{background-image:${svgUrl(ICON.end, '#ffffff')}}
-    .footer{font-size:13px;color:#9aa0a6}
+    .bar .right [aria-label="Meeting details"]{background-image:${svgUrl(ICON.info, '#e3e3e3')}}
+    .bar .right [aria-label="Show everyone"]{background-image:${svgUrl(ICON.people, '#e3e3e3')}}
+    .bar .right [aria-label="Chat with everyone"]{background-image:${svgUrl(ICON.chat, '#e3e3e3')}}
+    .bar .right [aria-label="Activities"]{background-image:${svgUrl(ICON.shapes, '#e3e3e3')}}
+    .bar .time{color:#e3e3e3}
     .stage .tile .name{font-size:12px}
-    .stage{height:430px;flex:none;padding:16px 16px 0}
-    .iOzk7{pointer-events:none;top:452px;bottom:auto;max-height:108px}
-    .bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px 16px}
+    .iOzk7{pointer-events:none}
+    .ygicle{font-size:17px}
   ` });
   await page.evaluate(() => {
     const stream = (w, h, draw) => { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); draw(x); setInterval(() => draw(x), 400); return c.captureStream(5); };
     const avatar = (bg, ring, initials, mirror) => (x) => { x.fillStyle = bg; x.fillRect(0, 0, 640, 360); x.fillStyle = ring; x.beginPath(); x.arc(320, 180, 84, 0, 7); x.fill(); x.save(); if (mirror) { x.translate(640, 0); x.scale(-1, 1); } x.fillStyle = '#F4F7F5'; x.font = '600 64px Inter, system-ui, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(initials, 320, 184); x.restore(); };
+    let step = 0; setInterval(() => { step++; }, 5000); // the presenter walks through the rules: a new snapshot each time
     const slide = (x) => {
       x.fillStyle = '#F7F4EC'; x.fillRect(0, 0, 1600, 900);
       x.fillStyle = '#4CC9A8'; x.fillRect(0, 0, 28, 900);
       x.fillStyle = '#12161A'; x.textAlign = 'left'; x.textBaseline = 'alphabetic';
       x.font = '600 84px Inter, system-ui, sans-serif'; x.fillText('Design rules we agreed on', 120, 200);
-      x.font = '500 42px Inter, system-ui, sans-serif'; x.fillStyle = '#5F6B72'; x.fillText('Weekly design sync · 21 Oct', 120, 270);
-      x.fillStyle = '#1A2126'; x.font = '400 46px Inter, system-ui, sans-serif';
-      ['Nothing generic: every screen answers one question', 'One accent colour, used for one job', 'Real content in every mock, no lorem ipsum', 'Ship the empty state with the feature'].forEach((t, i) => { x.fillStyle = '#4CC9A8'; x.beginPath(); x.arc(150, 400 + i * 100, 12, 0, 7); x.fill(); x.fillStyle = '#1A2126'; x.fillText(t, 190, 416 + i * 100); });
+      x.font = '500 42px Inter, system-ui, sans-serif'; x.fillStyle = '#5F6B72'; x.fillText('Weekly design sync · 22 Oct', 120, 270);
+      x.font = '400 46px Inter, system-ui, sans-serif';
+      ['Nothing generic: every screen answers one question', 'One accent colour, used for one job', 'Real content in every mock, no lorem ipsum', 'Ship the empty state with the feature'].forEach((t, i) => {
+        const on = i === step % 4;
+        if (on) { x.fillStyle = '#12161A'; x.beginPath(); x.roundRect(110, 360 + i * 100, 1380, 84, 16); x.fill(); }
+        x.fillStyle = on ? '#F4F7F5' : '#4CC9A8'; x.beginPath(); x.arc(150, 400 + i * 100, 12, 0, 7); x.fill();
+        x.fillStyle = on ? '#F4F7F5' : '#1A2126'; x.fillText(t, 190, 416 + i * 100);
+      });
     };
     const set = (id, s) => { const v = document.getElementById(id); if (v) v.srcObject = s; };
     set('cam2', stream(640, 360, avatar('#2E3F49', '#5B8DB8', 'PN')));
@@ -127,42 +141,43 @@ function mdToHtml(md) {
   await renderHtml(browser, `<html><body style="margin:0">${marquee()}</body></html>`, 1400, 560, path.join(__dirname, 'marquee-1400x560.png'));
 
   // ---- captures from the real extension, at 2x so they stay sharp when placed
-  const { ctx, sw, extId } = await launch({ scale: 2 });
+  const { ctx, sw } = await launch({ scale: 2 });
   const cap = (n) => path.join(TMP, n + '.png');
-  const page = await ctx.newPage(); await page.setViewportSize({ width: 1000, height: 640 });
+  const PANEL = '#meet-capture-panel .panel';
+  const inPanel = (body) => new Function(`const h = document.querySelector('#meet-capture-panel'); const panel = h && h.shadowRoot && h.shadowRoot.querySelector('.panel'); if (!panel) return false; ${body}`);
+  const page = await ctx.newPage(); await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('https://meet.google.com/abc-defg-hij');
   await page.click('#join');
-  await page.waitForSelector('#meet-capture-pill', { timeout: 8000 });
+  await page.waitForSelector(`${PANEL}.open`, { timeout: 8000 });
   await page.waitForSelector('#pres', { timeout: 8000 });
   await storeLook(page);
-  // The panel scrolls inside its own container, so it is opened tall enough to need no scrolling and
-  // each picture is a clip of it: the whole thing, or the part a screenshot is about.
-  const panel = await ctx.newPage(); await panel.setViewportSize({ width: 380, height: 1500 });
-  await panel.goto(`chrome-extension://${extId}/sidepanel/index.html`);
-  await panel.waitForSelector('.live', { timeout: 8000 });
-  await panel.addStyleTag({ content: '::-webkit-scrollbar{display:none}' });
-  const edge = (sel, which) => panel.evaluate(([q, w]) => { const els = document.querySelectorAll(q); const el = els[els.length - 1]; return el ? Math.round(el.getBoundingClientRect()[w]) : 0; }, [sel, which]);
-  const clipShot = async (name, top, height) => panel.screenshot({ path: cap(name), clip: { x: 0, y: top, width: 380, height } });
-  const wholeShot = async (name, lastSel) => clipShot(name, 0, Math.min(1500, (await edge(lastSel, 'bottom')) + 16));
-  await panel.waitForFunction(() => /\b[3-9]\d* lines|\b\d{2,} lines/.test(document.querySelector('#chip-lines').textContent), null, { timeout: 25000 });
-  await panel.waitForFunction(() => /\b[1-9]\d* snapshots?/.test(document.querySelector('#chip-snaps').textContent), null, { timeout: 25000 });
-  await sleep(1200); // a snapshot of the new slide
-  await page.bringToFront(); await page.screenshot({ path: cap('meet') });
-  await panel.bringToFront(); await wholeShot('panel-live', '.live');
-  await panel.click('[data-action="change-source"]'); await panel.waitForSelector('.pick'); await sleep(300);
-  await clipShot('panel-picker', (await edge('[data-action="snapshot"]', 'top')) - 14, 480);
-  await panel.click('[data-action="cancel-source"]');
-  await panel.click('#settings-btn'); await panel.waitForSelector('.settings');
-  await panel.fill('#myName', 'Jesh Shiva');
-  await panel.fill('#preface', 'Summarise the decisions and list action items with owners.');
-  await sleep(500); await wholeShot('panel-settings', '.settings');
-  await panel.click('[data-action="close-settings"]'); await panel.waitForSelector('.live');
-
-  await sleep(2500); await page.bringToFront(); await page.click('#leave');
-  await panel.bringToFront(); await panel.waitForSelector('.list li', { timeout: 15000 });
-  await panel.waitForFunction(() => /Saved/.test(document.body.textContent), null, { timeout: 30000 }).catch(() => {});
-  await sleep(600);
-  await wholeShot('panel-after', '.section');
+  await page.waitForFunction(inPanel("return panel.querySelectorAll('.msg').length >= 3 && panel.querySelectorAll('.snap').length >= 2;"), null, { timeout: 25000 });
+  await sleep(1500); // a snapshot of the readable slide
+  await page.screenshot({ path: cap('meet') });
+  await page.screenshot({ path: cap('meet-right'), clip: { x: 540, y: 100, width: 740, height: 700 } });
+  await page.waitForFunction(() => window.__fake && window.__fake.done, null, { timeout: 30000 });
+  await sleep(1200);
+  const appPromise = ctx.waitForEvent('page', { timeout: 15000 });
+  await page.click('#leave');
+  const app = await appPromise;
+  await app.waitForLoadState();
+  await page.waitForSelector('#meet-capture-after .card', { timeout: 8000 });
+  await sleep(400);
+  await page.screenshot({ path: cap('left') });
+  await page.screenshot({ path: cap('left-card'), clip: { x: 240, y: 300, width: 800, height: 500 } });
+  await app.bringToFront();
+  await app.setViewportSize({ width: 1280, height: 800 });
+  await app.waitForSelector('.tl .entry', { timeout: 15000 });
+  await app.waitForFunction(() => !document.querySelector('.meta .live'), null, { timeout: 15000 });
+  await app.waitForSelector('.strip .thumb', { timeout: 5000 });
+  await app.addStyleTag({ content: '::-webkit-scrollbar{display:none}' });
+  await sleep(800);
+  await app.screenshot({ path: cap('app') });
+  await app.click('#settings-btn'); await app.waitForSelector('#settings-form');
+  await app.fill('#s-myName', 'Jesh Shiva');
+  await app.fill('#s-preface', 'Summarise the decisions and list action items with owners.');
+  await sleep(600); await app.screenshot({ path: cap('app-settings') });
+  await app.click('#settings-form .buttons .btn');
   const md = await sw.evaluate(async () => {
     const m = (await MCC.store.listMeetings())[0];
     const { settings } = await chrome.storage.local.get('settings');
@@ -187,22 +202,23 @@ function mdToHtml(md) {
 
   // ---- the screenshots
   const S = (n) => path.join(__dirname, `screenshot-${n}.png`);
-  await renderHtml(browser, shot({ layout: 'top', title: 'Your Meet call, saved for Claude the moment you hang up',
-    sub: 'Captions with names and times, snapshots of the shared screen, one folder in Downloads. No bot in the call, nothing leaves your browser.',
-    art: `<div class="art" style="left:84px;top:262px">${browserFrame(cap('meet'), cap('panel-live'), 1112, 0.8, 'meet.google.com/abc-defg-hij')}</div>` }), 1280, 800, S(1));
+  await renderHtml(browser, shot({ layout: 'left', title: 'Captures your Meet call, inside Meet',
+    sub: 'A button in Meet\u2019s own bar opens a panel like Meet\u2019s own: captions with names and times, snapshots of the shared screen as it changes. No bot, nothing leaves your browser.',
+    art: `<div class="art" style="left:600px;top:88px">${frame(cap('meet-right'), 620, 'meet.google.com/abc-defg-hij')}</div>` }), 1280, 800, S(1));
+  await renderHtml(browser, shot({ layout: 'top', title: 'The moment you hang up, the meeting is ready for Claude',
+    sub: 'Your captures page opens by itself: the transcript with the snapshots in place. Open in Claude, copy, one ZIP, or save straight into a folder.',
+    art: `<div class="art" style="left:84px;top:270px">${frame(cap('app'), 1112, 'Meet Capture')}</div>` }), 1280, 800, S(2));
   await renderHtml(browser, shot({ layout: 'left', title: 'Captions become a transcript Claude can read',
     sub: 'Who said what, and when. Your standing note at the top. Snapshot markers between the right lines.',
-    art: `<div class="art frame" style="left:560px;top:100px;width:660px;transform:rotate(-1.4deg)"><img src="${url(cap('doc'))}"></div>` }), 1280, 800, S(2));
-  await renderHtml(browser, shot({ layout: 'left', title: 'Snapshots of the shared screen, each time it changes',
-    sub: 'Or on a timer, or with <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>. Pick the video yourself if Meet guesses wrong.',
-    art: `<div class="art" style="left:620px;top:96px">${browserFrame(null, cap('panel-picker'), 560, 1.47, 'Meet Capture for Claude')}</div>` }), 1280, 800, S(3));
-  await renderHtml(browser, shot({ layout: 'left', title: 'Everything stays on your computer',
-    sub: 'Export again, copy the transcript, or open Claude with it already in the message box. Captured meetings are kept for 30 days.',
-    art: `<div class="art" style="left:660px;top:96px">${browserFrame(null, cap('panel-after'), 456, 1.2, 'Meet Capture for Claude')}</div>` }), 1280, 800, S(4));
+    art: `<div class="art frame" style="left:560px;top:100px;width:660px;transform:rotate(-1.4deg)"><img src="${url(cap('doc'))}"></div>` }), 1280, 800, S(3));
+  await renderHtml(browser, shot({ layout: 'left', title: 'One card when you leave, one click to Claude',
+    sub: 'Lines, snapshots and length at a glance. Everything stays on your computer; captured meetings are kept for 30 days.',
+    art: `<div class="art" style="left:540px;top:160px">${frame(cap('left-card'), 680, 'meet.google.com/abc-defg-hij')}</div>` }), 1280, 800, S(4));
 
   // ---- README images
   const docs = path.join(ROOT, 'docs');
-  for (const [src, dst] of [['panel-live', 'panel.png'], ['panel-after', 'after.png'], ['meet', 'meet.png'], ['panel-settings', 'settings.png']]) fs.copyFileSync(cap(src), path.join(docs, dst));
+  for (const f of fs.readdirSync(docs)) if (/\.png$/.test(f)) fs.unlinkSync(path.join(docs, f));
+  for (const [src, dst] of [['meet', 'meet.png'], ['app', 'app.png'], ['left-card', 'card.png'], ['app-settings', 'settings.png']]) fs.copyFileSync(cap(src), path.join(docs, dst));
   await browser.close();
   console.log('assets written; captures in', TMP);
 })().catch((e) => { console.error(e); process.exit(1); });

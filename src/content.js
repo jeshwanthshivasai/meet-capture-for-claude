@@ -1,6 +1,6 @@
 // Runs on meet.google.com. Notices when you are in a call, reads the captions Meet draws on the page,
-// snapshots the shared screen, and streams all of it to the extension's service worker over a port.
-// Nothing is sent anywhere else. The page itself is never changed, apart from a small status pill.
+// snapshots the shared screen, streams all of it to the extension's service worker over a port, and
+// drives the capture UI inside Meet (src/ui.js). Nothing is sent anywhere else.
 (() => {
   const C = window.MCC;
   if (!C || window.__meetCaptureLoaded) return;
@@ -10,11 +10,11 @@
   const LOG = (...a) => { if (settings.debug) console.log('[MeetCapture]', ...a); };
 
   const state = {
-    inCall: false, missing: 0, meeting: null,
-    region: null, strategy: '', observer: null, transcript: null, keys: new WeakMap(), nextKey: 1,
+    inCall: false, missing: 0, meeting: null, ready: false, firstUpdate: true,
+    region: null, strategy: '', observer: null, transcript: null, keys: new WeakMap(), nextKey: 1, avatars: new Map(),
     captionsOn: null, ccAttempts: 0, ccLastTry: 0,
-    lineCount: 0, snapshotCount: 0, lastLines: [],
-    source: null, chosenSource: 'auto', candidates: [],
+    lineCount: 0, snapshotCount: 0, lines: [], snapshots: [], lastStats: null,
+    source: null, chosenSource: 'auto', candidates: [], share: null, selfPresenting: false,
     pending: new Map(), flushTimer: null, outbox: [],
   };
   const detector = C.createChangeDetector();
@@ -27,7 +27,7 @@
       threshold: C.THRESHOLDS[settings.snapshotSensitivity] || C.THRESHOLDS.normal,
       timerMs: settings.snapshotMode === 'timer' || settings.snapshotMode === 'both' ? Math.max(10, settings.snapshotEverySec) * 1000 : 0,
     });
-    renderPill();
+    renderUI();
   }
   chrome.storage.local.get('settings').then((r) => applySettings(r.settings)).catch(() => {});
   chrome.storage.onChanged.addListener((ch, area) => { if (area === 'local' && ch.settings) applySettings(ch.settings.newValue); });
@@ -63,6 +63,7 @@
     if (m.type === 'candidates') return sendCandidates();
     if (m.type === 'choose-source') { state.chosenSource = m.id || 'auto'; detector.reset(); return sendStatus(); }
     if (m.type === 'status') return sendStatus();
+    if (m.type === 'open-panel') return ui.setOpen(true);
   }
 
   // ------------------------------------------------------------------ the call
@@ -113,24 +114,33 @@
       const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
       if (saved && saved.code === code && Date.now() - saved.startedAt < 8 * 3600e3) m = saved;
     } catch (e) { /* no session storage */ }
-    if (!m) m = { id: `${code}-${Date.now().toString(36)}`, code, title: readTitle(), startedAt: Date.now(), url: location.href.split('?')[0], myName: readMyName() };
+    if (!m) {
+      m = { id: `${code}-${Date.now().toString(36)}`, code, title: readTitle(), startedAt: Date.now(), url: location.href.split('?')[0], myName: readMyName() };
+      try { sessionStorage.removeItem('meet-capture-panel-open'); } catch (e) { /* fine */ } // a new call starts with the panel as the setting says
+    }
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(m)); } catch (e) { /* fine */ }
-    Object.assign(state, { inCall: true, missing: 0, meeting: m, region: null, strategy: '', transcript: C.createTranscript(), keys: new WeakMap(), captionsOn: null, ccAttempts: 0, ccLastTry: 0, lineCount: 0, snapshotCount: 0, lastLines: [], source: null, chosenSource: 'auto' });
+    Object.assign(state, { inCall: true, missing: 0, meeting: m, ready: false, firstUpdate: true, region: null, strategy: '', transcript: C.createTranscript(), keys: new WeakMap(), avatars: new Map(), captionsOn: null, ccAttempts: 0, ccLastTry: 0, lineCount: 0, snapshotCount: 0, lines: [], snapshots: [], source: null, chosenSource: 'auto', selfPresenting: false });
     state.pending.clear(); state.outbox.length = 0; detector.reset();
+    ui.hideAfterCall();
     send({ type: 'meeting-start', meeting: meetingInfo() });
     LOG('call started', m);
+    setTimeout(() => { state.ready = true; renderUI(); }, 400); // let Meet finish drawing its bar before ours joins it
     sendStatus();
   }
   function leaveCall(reason) {
     if (!state.inCall) return;
     flushLines(true);
     detach();
-    send({ type: 'meeting-end', meetingId: state.meeting.id, endedAt: Date.now(), reason });
+    stopShare();
+    const info = { lineCount: state.lineCount, snapshotCount: state.snapshotCount, duration: Date.now() - state.meeting.startedAt, captured: state.lineCount + state.snapshotCount > 0 };
+    const meetingId = state.meeting.id;
+    send({ type: 'meeting-end', meetingId, endedAt: Date.now(), reason });
     // A reload mid-call fires pagehide too; the key stays so the reloaded page continues the same meeting.
     if (reason !== 'page closed') { try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { /* fine */ } }
     LOG('call ended', reason);
-    state.inCall = false; state.meeting = null; state.source = null; state.candidates = [];
-    renderPill();
+    state.inCall = false; state.meeting = null; state.source = null; state.candidates = []; state.ready = false;
+    renderUI();
+    if (reason === 'left the call') ui.showAfterCall(info, { openApp: () => send({ type: 'open-app', meetingId }), openClaude: () => send({ type: 'open-claude', meetingId }) });
   }
   window.addEventListener('pagehide', () => leaveCall('page closed'));
 
@@ -203,6 +213,7 @@
       let key = state.keys.get(el);
       if (!key) { key = state.nextKey++; state.keys.set(el, key); }
       seen.add(key);
+      if (!state.avatars.has(r.speaker)) { const img = el.querySelector('img[src^="https://"]'); if (img) state.avatars.set(r.speaker, img.src); }
       const { entry, changed } = state.transcript.upsert(key, r.speaker, r.text); // the speaker as Meet shows it; "You" is renamed at export time
       if (changed) queueLine(entry);
     }
@@ -218,16 +229,20 @@
     const tr = state.transcript;
     const all = tr ? tr.allLines() : [];
     state.lineCount = all.length;
-    state.lastLines = all.slice(-3).map((l) => ({ speaker: C.speakerAlias(l.speaker, settings.myName || state.meeting.myName), text: l.text.slice(-160) }));
+    const me = settings.myName || state.meeting.myName;
+    const lastOfEntry = new Map(); // only the newest segment of a block is still being written
+    for (const l of all) lastOfEntry.set(String(l.id).split('.')[0], l.id);
+    state.lines = all.map((l) => ({ id: l.id, speaker: C.speakerAlias(l.speaker, me), text: l.text, startedAt: l.startedAt, final: l.final || lastOfEntry.get(String(l.id).split('.')[0]) !== l.id, avatar: state.avatars.get(l.speaker) || '' }));
     const lines = now ? all : [...state.pending.values()].flatMap((e) => tr.lines(e));
     state.pending.clear();
     if (lines.length) send({ type: 'lines', meetingId: state.meeting.id, lines });
-    renderPill();
+    renderUI();
   }
 
   // ------------------------------------------------------------------ snapshots
   function pickSource() {
     const cands = C.candidates(document, window);
+    if (state.share) cands.unshift(state.share.candidate);
     state.candidates = cands;
     if (state.chosenSource !== 'auto') return cands.find((c) => c.id === state.chosenSource) || null;
     return cands.find((c) => c.likely && !c.self) || null;
@@ -237,7 +252,7 @@
     const pick = pickSource();
     const changedSource = (pick && pick.id) !== (state.source && state.source.id);
     state.source = pick;
-    if (changedSource) sendStatus();
+    if (changedSource) { sendStatus(); renderUI(); }
     if (!pick || settings.snapshotMode === 'manual') return;
     let sig;
     try { sig = C.signatureOf(pick.video, sigCanvas); } catch (e) { return; }
@@ -253,9 +268,13 @@
     try { shot = C.capture(pick.video, { maxWidth: settings.snapshotMaxWidth, format: settings.snapshotFormat, quality: 0.9, doc: document }); } catch (e) { LOG('snapshot failed', e); return false; }
     try { detector.saved(sig || C.signatureOf(pick.video, sigCanvas)); } catch (e) { /* fine */ }
     state.snapshotCount++;
-    send({ type: 'snapshot', meetingId: state.meeting.id, snapshot: { takenAt: Date.now(), reason, source: pick.label || (pick.presenting ? 'Presentation' : 'Shared screen'), width: shot.width, height: shot.height, format: shot.format, dataUrl: shot.dataUrl, thumb: shot.thumb } });
-    flashPill();
-    renderPill();
+    const takenAt = Date.now();
+    const source = pick.label || (pick.presenting ? 'Presentation' : 'Shared screen');
+    state.snapshots.push({ n: state.snapshotCount, takenAt, reason, thumb: shot.thumb });
+    if (state.snapshots.length > 300) state.snapshots.shift();
+    send({ type: 'snapshot', meetingId: state.meeting.id, snapshot: { takenAt, reason, source, width: shot.width, height: shot.height, format: shot.format, dataUrl: shot.dataUrl, thumb: shot.thumb } });
+    ui.flash();
+    renderUI();
     return true;
   }
   function snapshotNow(reason) {
@@ -266,6 +285,7 @@
   }
   function sendCandidates() {
     const cands = C.candidates(document, window);
+    if (state.share) cands.unshift(state.share.candidate);
     state.candidates = cands;
     const list = cands.map((c) => {
       let thumb = '';
@@ -275,7 +295,33 @@
     send({ type: 'candidates', meetingId: state.meeting && state.meeting.id, chosen: state.chosenSource, candidates: list });
   }
 
-  // ------------------------------------------------------------------ status for the panel
+  /** Your own share has no preview in Meet; Chrome's picker gives us the same picture to watch. */
+  async function captureShare() {
+    if (!state.inCall || state.share) return;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false, selfBrowserSurface: 'exclude', surfaceSwitching: 'include', systemAudio: 'exclude' });
+    } catch (e) { LOG('share capture cancelled', e); return; }
+    const video = document.createElement('video');
+    video.muted = true; video.playsInline = true; video.srcObject = stream;
+    try { await video.play(); } catch (e) { /* autoplay rules do not apply to muted video */ }
+    const candidate = { video, id: 'share', width: video.videoWidth, height: video.videoHeight, area: 1e9, label: 'Your screen share', presenting: true, self: false, mirrored: false, likely: true };
+    state.share = { stream, video, candidate };
+    const [track] = stream.getVideoTracks();
+    if (track) track.addEventListener('ended', stopShare);
+    detector.reset();
+    sendStatus(); renderUI();
+    setTimeout(() => { candidate.width = video.videoWidth; candidate.height = video.videoHeight; sampleSnapshots(); }, 600);
+  }
+  function stopShare() {
+    if (!state.share) return;
+    try { for (const t of state.share.stream.getTracks()) t.stop(); } catch (e) { /* fine */ }
+    state.share = null;
+    if (state.chosenSource === 'share') state.chosenSource = 'auto';
+    sendStatus(); renderUI();
+  }
+
+  // ------------------------------------------------------------------ status for the service worker and the captures page
   let statusTimer = null;
   function sendStatus() {
     if (statusTimer) return;
@@ -283,66 +329,64 @@
       statusTimer = null;
       if (!state.meeting) return send({ type: 'status', inCall: false });
       const s = state.source;
-      send({ type: 'status', inCall: true, meetingId: state.meeting.id, title: state.meeting.title, captionsOn: state.captionsOn, regionFound: !!state.region, strategy: state.strategy, lineCount: state.lineCount, snapshotCount: state.snapshotCount, lastLines: state.lastLines, chosenSource: state.chosenSource, selfPresenting: !!state.selfPresenting, source: s ? { id: s.id, label: s.label, width: s.width, height: s.height, presenting: s.presenting, likely: s.likely } : null, videos: state.candidates.length });
+      send({ type: 'status', inCall: true, meetingId: state.meeting.id, title: state.meeting.title, captionsOn: state.captionsOn, regionFound: !!state.region, strategy: state.strategy, lineCount: state.lineCount, snapshotCount: state.snapshotCount, chosenSource: state.chosenSource, selfPresenting: !!state.selfPresenting, shareActive: !!state.share, source: s ? { id: s.id, label: s.label, width: s.width, height: s.height, presenting: s.presenting, likely: s.likely } : null, videos: state.candidates.length });
     }, 150);
   }
 
-  // ------------------------------------------------------------------ the status pill on the page
-  let pill = null, pillBody = null, pillFlash = null;
-  function ensurePill() {
-    if (pill) return;
-    pill = document.createElement('div');
-    pill.id = 'meet-capture-pill';
-    const root = pill.attachShadow({ mode: 'closed' });
-    root.innerHTML = `<style>
-      :host{all:initial;position:fixed;top:14px;left:14px;z-index:2147483000;font:12px/1.3 system-ui,-apple-system,"Segoe UI",sans-serif;pointer-events:none}
-      .p{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 10px;border-radius:999px;background:rgba(18,22,26,.86);color:#E8EDF0;box-shadow:0 2px 10px rgba(0,0,0,.35);backdrop-filter:blur(6px);pointer-events:auto;transition:box-shadow .2s}
-      .p.flash{box-shadow:0 0 0 3px #4CC9A8,0 2px 10px rgba(0,0,0,.35)}
-      .dot{width:8px;height:8px;border-radius:50%;background:#E0533E;box-shadow:0 0 0 0 rgba(224,83,62,.6);animation:pulse 1.6s ease-out infinite}
-      .dot.off{background:#9AA3A8;animation:none}
-      @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(224,83,62,.6)}100%{box-shadow:0 0 0 8px rgba(224,83,62,0)}}
-      .t{white-space:nowrap}
-      button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;background:#4CC9A8;color:#0B1F19;font:600 12px system-ui,sans-serif}
-      button:hover{background:#6ADBBE}button:focus-visible{outline:2px solid #fff}
-      @media (prefers-reduced-motion:reduce){.dot{animation:none}}
-    </style><div class="p" role="status" aria-live="polite"><span class="dot"></span><span class="t"></span><button type="button" title="Snapshot the shared screen (Alt+Shift+S)">📷 Snapshot</button></div>`;
-    pillBody = root.querySelector('.t'); pillFlash = root.querySelector('.p');
-    root.querySelector('button').addEventListener('click', (e) => { if (e.isTrusted) snapshotNow('manual'); });
-    (document.body || document.documentElement).appendChild(pill);
+  // ------------------------------------------------------------------ the UI inside Meet
+  const ui = C.createMeetUI({
+    snapshot: () => snapshotNow('manual'),
+    setMode: (mode) => { if (['change', 'both', 'timer', 'manual'].includes(mode)) chrome.storage.local.set({ settings: { ...settings, snapshotMode: mode } }).catch(() => {}); },
+    chooseSource: (id) => { state.chosenSource = id || 'auto'; detector.reset(); sendStatus(); renderUI(); },
+    captureShare,
+    enableCaptions: () => { state.ccAttempts = 0; state.ccLastTry = 0; enableCaptions(true); },
+    openApp: () => send({ type: 'open-app', meetingId: state.meeting && state.meeting.id }),
+    toggled: () => {},
+  });
+  let uiTimer = null;
+  function renderUI() {
+    if (uiTimer) return;
+    uiTimer = setTimeout(() => {
+      uiTimer = null;
+      if (!state.inCall) { ui.update({ inCall: false }); return; }
+      const s = state.source;
+      ui.update({
+        inCall: true, ready: state.ready, firstUpdate: state.firstUpdate, openByDefault: settings.openPanel,
+        elapsed: Date.now() - state.meeting.startedAt, lineCount: state.lineCount, snapshotCount: state.snapshotCount,
+        lines: state.lines, snapshots: state.snapshots, captionsOn: state.captionsOn, regionFound: !!state.region,
+        mode: settings.snapshotMode, chosenSource: state.chosenSource, selfPresenting: state.selfPresenting, shareActive: !!state.share,
+        source: s ? { id: s.id, label: s.label, presenting: s.presenting, likely: s.likely } : null,
+        candidates: state.candidates.map((c) => ({ id: c.id, label: c.label, width: c.width, height: c.height, presenting: c.presenting, self: c.self })),
+      });
+      if (state.ready) state.firstUpdate = false;
+    }, 120);
   }
-  function renderPill() {
-    if (!state.inCall || !settings.showPill) { if (pill) pill.remove(), pill = null; return; }
-    ensurePill();
-    if (!pill.isConnected) (document.body || document.documentElement).appendChild(pill);
-    const cc = state.region ? '' : state.captionsOn === false ? ' · captions off' : ' · waiting for captions';
-    const share = state.selfPresenting && !(state.source && (state.source.presenting || state.source.likely)) ? ' · your share has no preview here: snapshot it from the panel' : '';
-    pillBody.textContent = `Capturing · ${state.lineCount} line${state.lineCount === 1 ? '' : 's'} · ${state.snapshotCount} snapshot${state.snapshotCount === 1 ? '' : 's'}${cc}${share}`;
-    pillFlash.querySelector('.dot').classList.toggle('off', !state.region);
-  }
-  function flashPill() {
-    if (!pillFlash) return;
-    pillFlash.classList.add('flash');
-    setTimeout(() => pillFlash && pillFlash.classList.remove('flash'), 600);
-  }
+  // Meet shows one side panel at a time; ours steps aside when one of Meet's opens.
+  document.addEventListener('click', (e) => {
+    if (!ui.isOpen()) return;
+    const b = e.target.closest && e.target.closest('button[aria-label], [role="button"][aria-label]');
+    if (b && !b.closest('#meet-capture-button') && /chat with everyone|^chat$|in-call messages|show everyone|^people$|participants|activities|meeting details|host controls/i.test(b.getAttribute('aria-label') || '')) ui.setOpen(false);
+  }, true);
 
   // ------------------------------------------------------------------ the loop
   function tick() {
-    if (!chrome.runtime?.id) { clearInterval(loop); clearInterval(snapLoop); clearInterval(pollLoop); return; }
+    if (!chrome.runtime?.id) { clearInterval(loop); clearInterval(snapLoop); clearInterval(pollLoop); ui.destroy(); return; }
     const leave = findLeaveControl();
     if (leave) { state.missing = 0; if (!state.inCall) enterCall(); }
     else if (state.inCall && ++state.missing >= 3) leaveCall('left the call');
     if (!state.inCall) { const n = readMyName(); if (n) nameHint = n; return; }
     const presenting = isSelfPresenting();
-    if (presenting !== !!state.selfPresenting) { state.selfPresenting = presenting; renderPill(); }
+    if (presenting !== !!state.selfPresenting) { state.selfPresenting = presenting; if (!presenting) stopShare(); }
     checkCaptions();
     checkRegion();
     const title = readTitle();
     if (title && title !== state.meeting.title && title !== state.meeting.code) { state.meeting.title = title; send({ type: 'meeting-update', meetingId: state.meeting.id, title }); try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(state.meeting)); } catch (e) { /* fine */ } }
     if (!state.meeting.myName) { const n = readMyName(); if (n) { state.meeting.myName = n; send({ type: 'meeting-update', meetingId: state.meeting.id, myName: n }); } }
     sendStatus();
+    renderUI();
   }
   const loop = setInterval(tick, 1500);
-  const snapLoop = setInterval(sampleSnapshots, 2000);
+  const snapLoop = setInterval(sampleSnapshots, 800);
   const pollLoop = setInterval(() => { if (state.region) scan(); }, 1000); // belt and braces for a missed mutation
   connect();
   tick();

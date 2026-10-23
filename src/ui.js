@@ -6,7 +6,7 @@
   const NS = (root.MCC = root.MCC || {});
   const esc = NS.esc;
   const FONT = '"Google Sans Text","Google Sans",Roboto,"Segoe UI",system-ui,-apple-system,sans-serif';
-  const ICON = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>'; // the extension's mark (store/assets/icon.js), at the weight of Meet's own bar icons
+  const ICON = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 15.5h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'; // the extension's mark, a screen with a caption (store/assets/icon.js), as an outline like Meet's own bar icons
   const CLOSE = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path fill="currentColor" d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 0 0 5.7 7.11L10.59 12 5.7 16.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4z"/></svg>';
   const CAMERA = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M9 3 7.17 5H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3.17L15 3H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10zm0-8a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>';
   const PALETTE = ['#0b57d0', '#146c2e', '#b3261e', '#7a4e00', '#6750a4', '#00677d', '#8e4585', '#3c6e00'];
@@ -47,7 +47,7 @@
     .snap{margin:12px 0 0 44px;border:1px solid #c4c7c5;border-radius:8px;overflow:hidden;background:#f2f2f2}
     .snap img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#1f1f1f}
     .snap .cap{display:flex;gap:8px;padding:6px 10px;font-size:12px;line-height:16px;color:#444746}
-    .snap .cap b{color:#1f1f1f;font-weight:500}
+    .snap .cap b{color:#1f1f1f;font-weight:500;white-space:nowrap}
     footer{border-top:1px solid #e3e3e3;padding:12px 16px 16px 24px;display:flex;flex-direction:column;gap:10px;background:#fff}
     .row{display:flex;gap:8px;align-items:center}
     .btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 20px 0 16px;border-radius:20px;background:#0b57d0;color:#fff;font:500 14px/20px ${FONT};white-space:nowrap;transition:box-shadow .15s,background .15s}
@@ -63,6 +63,8 @@
     .callout{background:#e8f0fe;color:#041e49;border-radius:8px;padding:10px 12px;font-size:13px;line-height:18px}
     .callout .btn{height:32px;padding:0 14px;margin-top:8px;font-size:13px}
     .callout.ok{background:#e6f4ea;color:#0d652d}
+    .callout b{font-weight:500}
+    .note{font-size:12px;line-height:16px;color:#1f1f1f;background:#f2f2f2;border-radius:6px;padding:6px 10px}
     .kbd{font:500 11px/16px ${FONT};color:#444746;border:1px solid #c4c7c5;border-radius:4px;padding:0 5px;margin-left:auto}
     @media (max-width:640px){.panel{left:16px;width:auto}}
     @media (prefers-reduced-motion:reduce){.panel{transition:none}.dot,.text.live::after{animation:none}}`;
@@ -76,6 +78,9 @@
     button[aria-pressed="true"]{background:#a8c7fa;color:#062e6f}
     .badge{position:absolute;top:-2px;right:-2px;min-width:10px;height:10px;border-radius:5px;background:#dc362e;border:2px solid #202124;pointer-events:none;opacity:0;transition:opacity .2s}
     .badge.on{opacity:1}
+    .badge.ask{opacity:1;background:#fbbc04;box-shadow:0 0 0 0 rgba(251,188,4,.7);animation:ring 1.4s ease-out infinite}
+    @keyframes ring{to{box-shadow:0 0 0 8px rgba(251,188,4,0)}}
+    @media (prefers-reduced-motion:reduce){.badge.ask{animation:none}}
     .tip{position:absolute;bottom:calc(100% + 10px);left:50%;transform:translateX(-50%);background:#3c4043;color:#e8eaed;font:500 12px/16px ${FONT};padding:6px 8px;border-radius:4px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .1s;z-index:2}
     .wrap:hover .tip,button:focus-visible~.tip{opacity:1}`;
 
@@ -115,6 +120,7 @@
           <div class="feed" data-el="feed" aria-live="polite" aria-relevant="additions text"><div class="empty" data-el="empty"></div></div>
           <footer>
             <div data-el="callout" hidden></div>
+            <div class="note" data-el="note" role="status" hidden></div>
             <div class="row"><button class="btn" data-act="snapshot" title="Take a snapshot of the shared screen now (Alt+Shift+S)">${CAMERA}Snapshot</button>
               <select class="sel" data-el="mode" aria-label="Automatic snapshots"><option value="change">Auto: on change</option><option value="both">Auto: change + timer</option><option value="timer">Auto: timer</option><option value="manual">Auto: off</option></select></div>
             <div class="src"><span data-el="source"></span><select data-el="sources" aria-label="Which video to snapshot" hidden></select><button class="link" data-act="app">All captures</button></div>
@@ -300,17 +306,27 @@
         els.source.textContent = src ? `Snapshots of ${src.label || 'the shared screen'}` : st.selfPresenting ? '' : 'No shared screen yet';
       }
       if (st.shareActive) els.source.textContent = 'Snapshots of your screen share';
-      const badge = bsh && bsh.querySelector('.badge'); if (badge) badge.classList.toggle('on', !!st.regionFound);
+      const badge = bsh && bsh.querySelector('.badge');
+      if (badge) { badge.classList.toggle('on', !!st.regionFound); badge.classList.toggle('ask', !!(st.selfPresenting && !st.shareActive && !open)); } // amber and pulsing: the panel has an offer you have not seen
       // Presenting yourself: Meet shows no preview of your own share.
       const c = els.callout;
       if (st.selfPresenting && !st.shareActive) {
-        if (c.dataset.kind !== 'share') { c.dataset.kind = 'share'; c.className = 'callout'; c.innerHTML = `You're presenting. Meet's own preview of your share stops updating once you switch to another window, so pick your share here once and snapshots of it continue by themselves, whatever is on your screen.<br><button class="btn" data-act="share">${CAMERA}Capture my share</button>`; }
+        if (c.dataset.kind !== 'share') { c.dataset.kind = 'share'; c.className = 'callout'; c.innerHTML = `<b>You're presenting.</b> Meet's own preview of your share freezes when you switch to another window. Pick your share once, and snapshots follow whatever is on your screen.<br><button class="btn" data-act="share">${CAMERA}Capture my share</button>`; }
         c.hidden = false;
       } else if (st.shareActive) {
         if (c.dataset.kind !== 'sharing') { c.dataset.kind = 'sharing'; c.className = 'callout ok'; c.textContent = 'Capturing your screen share: snapshots are taken as it changes, even while this tab is in the background. Alt+Shift+S takes one from any app.'; }
         c.hidden = false;
       } else { c.hidden = true; c.dataset.kind = ''; }
       renderFeed(st);
+    }
+
+    let noticeTimer = null;
+    /** A short message in the panel's footer, for four seconds: what a click did not manage, and why. */
+    function notice(text) {
+      ensurePanel();
+      els.note.textContent = text; els.note.hidden = false;
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { if (els.note) els.note.hidden = true; }, 4000);
     }
 
     function flash(b) {
@@ -348,7 +364,7 @@
     function hideAfterCall() { if (card) { card.remove(); card = null; } }
 
     root.addEventListener('resize', placePanel);
-    return { update, setOpen, isOpen: () => open, flash, showAfterCall, hideAfterCall, destroy: () => { destroyPanel(); hideAfterCall(); } };
+    return { update, setOpen, isOpen: () => open, flash, notice, showAfterCall, hideAfterCall, destroy: () => { destroyPanel(); hideAfterCall(); } };
   }
 
   Object.assign(NS, { createMeetUI, colorFor, initials });

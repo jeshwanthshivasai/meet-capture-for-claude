@@ -76,7 +76,10 @@ chrome.runtime.onMessage.addListener((m, sender) => {
 function contentPort(port) {
   const tabId = port.sender && port.sender.tab ? port.sender.tab.id : null;
   if (tabId == null) { try { port.disconnect(); } catch (e) { /* fine */ } return; }
-  port.onMessage.addListener((m) => { onContent(m).catch((e) => console.warn('[MeetCapture]', e)); });
+  // Messages from one tab are handled in the order they were sent: a 'meeting-update' or a line that follows
+  // 'meeting-start' by a millisecond must find the meeting already there, not a handler still awaiting storage.
+  let chain = Promise.resolve();
+  port.onMessage.addListener((m) => { chain = chain.then(() => onContent(m)).catch((e) => console.warn('[MeetCapture]', e)); });
   port.onDisconnect.addListener(() => {
     void chrome.runtime.lastError;
     const cur = live.get(tabId);

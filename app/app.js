@@ -76,7 +76,7 @@
         for (const [id] of state.status) if (!state.live.some((l) => l.meetingId === id)) state.status.delete(id);
         if (state.current && !state.meetings.some((x) => x.id === state.current)) { renderMain(); break; }
         if (state.current) { if ($('#head')) { renderHead(); scheduleTimeline(); } else renderMain(); } else renderMain();
-        if ($('#settings').open) fillSettings();
+        if ($('#settings').open) fillSettings(!sdDirty); // a dialog you have not touched follows changes made elsewhere; one you have keeps your edits
         maybeAutoSave();
         break;
       }
@@ -103,7 +103,7 @@
       case 'exported': { state.exporting = state.exporting.filter((x) => x !== m.meetingId); renderHead(); toast(`ZIP saved: ${m.path ? m.path.split(/[\\/]/).slice(-2).join('/') : m.file}`, m.downloadId != null ? { label: 'Show', run: () => chrome.downloads.show(m.downloadId) } : null); break; }
       case 'export-failed': state.exporting = state.exporting.filter((x) => x !== m.meetingId); renderHead(); toast('The ZIP could not be saved: ' + m.error); break;
       case 'toast': toast(m.text); break;
-      case 'settings': state.settings = C.settingsWithDefaults(m.settings); if ($('#settings').open) fillSettings(); if (state.current) { renderHead(); scheduleTimeline(); } break;
+      case 'settings': state.settings = C.settingsWithDefaults(m.settings); if ($('#settings').open) fillSettings(!sdDirty); if (state.current) { renderHead(); scheduleTimeline(); } break;
       case 'show': if (m.meetingId) go(m.meetingId); break;
       case 'claude-opened': if (!m.fits) { copyTranscript(m.meetingId, true).then(() => toast('The transcript is too long to prefill. It is on your clipboard: paste it into the chat.')); } break;
       case 'usage': { const u = $('#usage'); if (u) u.textContent = `${(m.usage.bytes / 1048576).toFixed(1)} MB in ${plural(m.usage.snapshots, 'snapshot')}`; break; }
@@ -598,7 +598,7 @@
   }
   lb.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-lb]');
-    if (!b) { if (e.target === lb) lb.close(); return; }
+    if (!b) { if (e.target === lb || e.target.classList.contains('lb')) lb.close(); return; } // beside the picture: close
     const { id, n } = state.lightbox || {};
     const act = b.dataset.lb;
     try {
@@ -622,7 +622,7 @@
     cf.innerHTML = `<div class="dlg"><h2 id="confirm-title">${esc(title)}</h2><p class="sub">${esc(text)}</p><div class="buttons"><button class="btn" data-c="0">Cancel</button><button class="btn primary" data-c="1">${esc(okLabel)}</button></div></div>`;
     cf.showModal();
     return new Promise((resolve) => {
-      const on = (e) => { const b = e.target.closest('[data-c]'); if (!b) return; cf.removeEventListener('click', on); cf.close(); resolve(b.dataset.c === '1'); };
+      const on = (e) => { const b = e.target.closest('[data-c]'); if (!b) { if (e.target === cf) cf.close(); return; } cf.removeEventListener('click', on); cf.close(); resolve(b.dataset.c === '1'); }; // outside the box: cancel
       cf.addEventListener('click', on);
       cf.addEventListener('close', () => { cf.removeEventListener('click', on); resolve(false); }, { once: true });
     });
@@ -630,10 +630,12 @@
 
   // ------------------------------------------------------------------ settings
   const sd = $('#settings');
+  let sdDirty = false, sdDownOn = null; // edits live in the form until Save; Cancel, the ×, Escape and a click outside drop them
   function openSettings() {
     if (sd.open) return;
-    sd.innerHTML = `<form class="dlg" method="dialog" id="settings-form">
-      <h2 id="settings-title">Settings</h2><p class="sub">Everything stays on this computer.</p>
+    sdDirty = false;
+    sd.innerHTML = `<form class="dlg" id="settings-form">
+      <div class="head"><div><h2 id="settings-title">Settings</h2><p class="sub">Everything stays on this computer.</p></div><button type="button" class="ib" data-f="cancel" aria-label="Close without saving" title="Close without saving">${ICONS.close}</button></div>
       <div class="field"><label for="s-myName">Your name</label><input type="text" id="s-myName" name="myName" placeholder="As it should appear in transcripts"><span class="help">Meet labels you "You". This name replaces it, in every meeting, including past ones.</span></div>
       <div class="field"><span class="lbl">When you leave a call</span><div class="radios">
         <label><input type="radio" name="afterCall" value="open"><span>Open the meeting here<small>This page opens on the meeting, ready for Claude.</small></span></label>
@@ -660,35 +662,61 @@
         <div class="field"><span class="lbl">Usage</span><span id="usage">…</span><span class="help"><button type="button" class="btn sm danger" id="delete-all">Delete all meetings</button></span></div></div>
         <div class="field"><label class="check"><input type="checkbox" name="includeJson"><span>Add meeting.json to exports<small>The raw lines and snapshot list, for your own tools.</small></span></label></div></div>
       <div class="foot"><span>Meet Capture for Claude ${esc(VERSION)}</span><a href="${REPO}" target="_blank" rel="noopener">GitHub</a><a href="${REPO}/blob/main/PRIVACY.md" target="_blank" rel="noopener">Privacy</a><a href="${REPO}/issues" target="_blank" rel="noopener">Report a problem</a></div>
-      <div class="buttons"><button class="btn primary" value="close">Done</button></div></form>`;
-    fillSettings();
+      <div class="buttons"><button type="button" class="btn" data-f="cancel">Cancel</button><button type="submit" class="btn primary" id="s-save">Save</button></div></form>`;
+    fillSettings(true);
     sd.showModal();
     send({ type: 'usage' });
     const form = $('#settings-form');
-    let t = null;
-    form.addEventListener('input', (e) => { if (e.target.matches('input[type="text"], textarea, input[type="number"]')) { clearTimeout(t); t = setTimeout(() => saveSettings(readSettings()), 400); } });
-    form.addEventListener('change', (e) => { if (!e.target.matches('input[type="text"], textarea')) saveSettings(readSettings()); });
+    form.addEventListener('input', () => { sdDirty = true; });
+    form.addEventListener('change', (e) => { sdDirty = true; if (e.target.name === 'snapshotMode') timerField(); });
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const next = readSettings(), changed = JSON.stringify(next) !== JSON.stringify(state.settings);
+      sdDirty = false;
+      if (changed) saveSettings(next);
+      sd.close();
+      if (changed) toast('Settings saved.');
+    });
     $('#delete-all').addEventListener('click', async () => { if (await confirm('Delete all meetings?', 'Every captured meeting on this computer will be removed, except a call that is live now. Files you saved or downloaded stay.', 'Delete all')) { send({ type: 'delete-all' }, { keep: true }); toast('All meetings deleted.'); } });
   }
+  sd.addEventListener('pointerdown', (e) => { sdDownOn = e.target; });
   sd.addEventListener('click', async (e) => { // once, on the dialog itself: the form inside is rebuilt on every open
+    if (e.target === sd) { if (sdDownOn === sd) sd.close(); return; } // outside the box (pressed there too, not a drag out of a field): close without saving
     const b = e.target.closest('[data-f]'); if (!b) return;
     try {
-      if (b.dataset.f === 'choose') { await chooseFolder(); fillSettings(); renderHead(); }
-      else if (b.dataset.f === 'forget') { await forgetFolder(); fillSettings(); }
+      if (b.dataset.f === 'cancel') sd.close();
+      else if (b.dataset.f === 'choose') { await chooseFolder(); fillSettings(false); renderHead(); } // the folder is kept at once, like before: it is a permission, not a setting
+      else if (b.dataset.f === 'forget') { await forgetFolder(); fillSettings(false); }
     } catch (err) { if (err && err.name !== 'AbortError') toast(String(err.message || err)); }
   });
-  function fillSettings() {
+  sd.addEventListener('close', () => { // closed by Cancel, the ×, Escape or a click outside with edits pending: say so, and offer them back
+    if (!sdDirty) return;
+    sdDirty = false;
+    const form = $('#settings-form'); if (!form) return;
+    const pending = readSettings();
+    toast('Closed without saving.', { label: 'Save', run: () => { saveSettings(pending); toast('Settings saved.'); } });
+  });
+  /** fields: also set every field from the saved settings (on open, or while the form is untouched); the folder row always follows the folder. */
+  function fillSettings(fields) {
     const form = $('#settings-form'); if (!form) return;
     const s = state.settings;
-    for (const el of form.elements) {
-      if (!el.name) continue;
-      if (el.type === 'checkbox') el.checked = !!s[el.name];
-      else if (el.type === 'radio') el.checked = s[el.name] === el.value;
-      else if (document.activeElement !== el) el.value = s[el.name];
+    if (fields) {
+      for (const el of form.elements) {
+        if (!el.name) continue;
+        if (el.type === 'checkbox') el.checked = !!s[el.name];
+        else if (el.type === 'radio') el.checked = s[el.name] === el.value;
+        else if (document.activeElement !== el) el.value = s[el.name];
+      }
     }
     const row = $('#folder-row');
     if (row) row.innerHTML = state.folder ? `<code>${esc(state.folder.name)}</code><button type="button" class="btn sm" data-f="choose">Change</button><button type="button" class="btn sm" data-f="forget">Forget</button>` : `<span class="help">No folder chosen yet.</span><button type="button" class="btn sm" data-f="choose" ${'showDirectoryPicker' in window ? '' : 'disabled'}>Choose folder…</button>`;
-    const auto = $('#s-autoFolder'); if (auto) auto.disabled = !state.folder;
+    const auto = $('#s-autoFolder'); if (auto) { auto.disabled = !state.folder; if (!state.folder) auto.checked = false; }
+    timerField();
+  }
+  /** The timer's seconds mean nothing unless a timer is in use. */
+  function timerField() {
+    const mode = $('#s-snapshotMode'), every = $('#s-snapshotEverySec');
+    if (mode && every) every.disabled = !/timer|both/.test(mode.value);
   }
   function readSettings() {
     const form = $('#settings-form'); const out = { ...state.settings };

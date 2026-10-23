@@ -1,6 +1,6 @@
 // Promo art without text, as the Web Store asks: caption lines flowing into a document, with the icon's
-// capture mark on the shared screen. Same palette as the icon and the panel.
-const { captureMark } = require('./icon');
+// mark, a screen with a caption, on the shared screen. Same palette as the icon and the panel.
+const { screenMark } = require('./icon');
 const INK = '#12161A', INK2 = '#1F282E', PAPER = '#F4F7F5', SOFT = '#AEB9BF', MINT = '#4CC9A8', LINE = '#2C383F';
 
 function defs(w, h) {
@@ -29,7 +29,7 @@ function screen(x, y, w) {
     <rect x="${x + w * 0.1}" y="${y + h * 0.45}" width="${w * 0.75}" height="${h * 0.06}" rx="${h * 0.03}" fill="#8A969C"/>
     <rect x="${x + w * 0.1}" y="${y + h * 0.58}" width="${w * 0.6}" height="${h * 0.06}" rx="${h * 0.03}" fill="#8A969C"/>
     <rect x="${x + w * 0.1}" y="${y + h * 0.74}" width="${w * 0.35}" height="${h * 0.14}" rx="${h * 0.03}" fill="${MINT}"/>
-    ${captureMark(MINT, { x: x + w * 0.78, y: y + h * 0.7, size: w * 0.16 })}
+    ${screenMark(MINT, { x: x + w * 0.78, y: y + h * 0.7, size: w * 0.16 })}
   </g>`;
 }
 

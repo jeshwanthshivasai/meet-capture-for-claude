@@ -105,14 +105,37 @@
     return v.parentElement;
   }
 
+  const MIRROR = /you are presenting|infinity mirror/i;           // Meet's note on its own preview of your share
+  const ICON_WORD = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;                   // a Material Symbols ligature: open_in_full, more_vert, mic
+  const UI_LINE = /^(enter|exit) full ?screen$|^(pin|unpin|mute|unmute|remove|more options|minimi[sz]e|maximi[sz]e)\b/i;
+  const SELF_TAG = /\s*\((?:you|vous|du|tú|você|sie|tu)\b[^)]*\)/i;  // "(You)", "(You, presenting)"
+  const NAME_LINE = /^\p{Lu}[\p{L}'’.-]*(?:\s+[\p{L}'’.-]+){0,4}$/u;
+
+  /**
+   * One short label for a tile, from the lines of text it shows: a participant's name when there is one,
+   * else the first line that is not an icon's name, a control's label or Meet's own note, cut at a
+   * sentence end and capped at 40 characters. "" when nothing fits.
+   */
+  function cleanLabel(lines) {
+    const out = [];
+    for (const raw of lines) {
+      let s = normalize(raw).replace(SELF_TAG, '');
+      if (!s || ICON_WORD.test(s) || UI_LINE.test(s) || MIRROR.test(s)) continue;
+      s = s.split(/(?<=[.!?…])\s+/)[0];
+      if (s) out.push(s);
+    }
+    const pick = out.find((s) => s.length <= 40 && NAME_LINE.test(s)) || out[0] || '';
+    return pick.length <= 40 ? pick : pick.slice(0, 40).replace(/\s+\S*$/, '') + '…';
+  }
+  const linesOf = (tile) => String((tile && (tile.innerText != null ? tile.innerText : tile.textContent)) || '').split(/\n+/);
+
   function labelOf(tile) {
     if (!tile) return '';
     const self = tile.querySelector('[data-self-name]');
-    if (self) return normalize(self.getAttribute('data-self-name') || self.textContent).slice(0, 80);
+    if (self) return cleanLabel([self.getAttribute('data-self-name') || self.textContent]);
     const aria = tile.getAttribute('aria-label');
-    if (aria) return normalize(aria).slice(0, 80);
-    const first = normalize(tile.innerText || '').split(/(?<=\S)\s{2,}|\n/)[0] || '';
-    return first.slice(0, 80);
+    if (aria) { const l = cleanLabel([aria]); if (l) return l; }
+    return cleanLabel(linesOf(tile));
   }
 
   /** Visible, playing videos on the page, best guess for the shared screen first. */
@@ -125,17 +148,18 @@
       const style = win.getComputedStyle(v);
       if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) continue;
       const tile = tileOf(v);
-      const label = labelOf(tile);
       const text = normalize(((tile && tile.innerText) || '') + ' ' + ((tile && tile.getAttribute('aria-label')) || '') + ' ' + [...((tile && tile.querySelectorAll('[aria-label]')) || [])].map((b) => b.getAttribute('aria-label')).join(' '));
+      const mirror = MIRROR.test(text); // Meet's own preview of your share: Meet inside Meet, frozen while this tab is in the background
+      const label = mirror ? "Meet's preview of your share" : labelOf(tile);
       const mirrored = /matrix\(-1|scaleX\(-1\)|scale\(-1/.test(style.transform || '');
-      const presenting = PRESENTING.test(text);
-      const self = !presenting && (mirrored || /^you$/i.test(label) || /\(you\)/i.test(text));
-      out.push({ video: v, id: idOf(v), width: v.videoWidth, height: v.videoHeight, area: Math.round(r.width * r.height), label, presenting, self, mirrored, likely: presenting });
+      const presenting = mirror || PRESENTING.test(text);
+      const self = !presenting && (mirrored || /^you$/i.test(label) || SELF_TAG.test(text));
+      out.push({ video: v, id: idOf(v), width: v.videoWidth, height: v.videoHeight, area: Math.round(r.width * r.height), label, presenting, self, mirror, mirrored, likely: presenting });
     }
     // A share Meet does not label: the biggest picture on screen, at a resolution no webcam tile gets.
     const maxArea = out.reduce((m, c) => Math.max(m, c.area), 0);
     for (const c of out) if (!c.self && !c.mirrored && (c.width >= 1400 || (c.width >= 960 && c.area === maxArea))) c.likely = true;
-    out.sort((a, b) => (b.presenting - a.presenting) || (b.likely - a.likely) || (a.self - b.self) || (b.area - a.area));
+    out.sort((a, b) => (b.presenting - a.presenting) || (Number(a.mirror) - Number(b.mirror)) || (b.likely - a.likely) || (a.self - b.self) || (b.area - a.area)); // a real share before Meet's mirror of yours
     return out;
   }
 
@@ -153,5 +177,5 @@
     return { dataUrl, thumb: t.toDataURL('image/jpeg', 0.7), width: w, height: h, format };
   }
 
-  Object.assign(NS, { signatureOf, difference, isBlank, createChangeDetector, candidates, capture, SIG_W, SIG_H });
+  Object.assign(NS, { signatureOf, difference, isBlank, createChangeDetector, candidates, cleanLabel, capture, MIRROR, SIG_W, SIG_H });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

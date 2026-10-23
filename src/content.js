@@ -14,7 +14,7 @@
     region: null, strategy: '', observer: null, transcript: null, keys: new WeakMap(), nextKey: 1, avatars: new Map(),
     captionsOn: null, ccAttempts: 0, ccLastTry: 0,
     lineCount: 0, snapshotCount: 0, lines: [], snapshots: [], lastStats: null,
-    source: null, chosenSource: 'auto', candidates: [], share: null, selfPresenting: false,
+    source: null, chosenSource: 'auto', candidates: [], share: null, selfPresenting: false, presentMiss: 0, enteredAt: 0,
     pending: new Map(), flushTimer: null, outbox: [],
   };
   const detector = C.createChangeDetector();
@@ -94,11 +94,44 @@
     if (acct) { const m = /:\s*([^(\n]+?)\s*(?:\(|\n|$)/.exec(acct.getAttribute('aria-label') || ''); if (m) return C.normalize(m[1]).slice(0, 80); }
     return nameHint;
   }
-  /** Is the user sharing their own screen? Meet then shows a "Stop presenting" control. */
-  function isSelfPresenting() {
+  // What Meet writes on the page about you, in words rather than attributes: the top bar and the People list
+  // say "Name (You)" or "Name (You, presenting)", the tile of your own share says "You are presenting", and the
+  // control to stop is a plain-text "Stop presenting" button. One walk over the page's text nodes reads all of it.
+  const STOP_LABEL = /stop (presenting|sharing)/i;
+  const PRESENT_TEXT = /\b(you, presenting|you are presenting|stop presenting|stop sharing)\b/i;
+  const SELF_TAG = /\((?:you|vous|du|tú|você|sie|tu)\b/i;
+  const SELF_LABEL = /^(.{1,80}?)\s*\((?:you|vous|du|tú|você|sie|tu)\b[^)]*\)$/i;
+  /** @returns { presenting: boolean, name: string } — name only when wantName, and only when the page shows one */
+  function readPage(wantName) {
+    const out = { presenting: false, name: '' };
     for (const b of document.querySelectorAll('button[aria-label], [role="button"][aria-label], [data-tooltip]')) {
-      if (/stop (presenting|sharing)/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-tooltip') || ''))) return true;
+      if (STOP_LABEL.test((b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('data-tooltip') || ''))) { out.presenting = true; break; }
     }
+    if (out.presenting && !wantName) return out;
+    // Not captions (someone may say "you are presenting"), not the chat, not our own UI, nothing hidden.
+    const skip = (el) => !el || /^(script|style|noscript)$/i.test(el.tagName) || (state.region && state.region.contains(el)) || el.closest('[aria-live], [role="log"], #meet-capture-panel, #meet-capture-button, #meet-capture-after') || !el.getClientRects().length;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const v = n.nodeValue;
+      if (!v || v.length < 3 || v.length > 300) continue;
+      const hitP = !out.presenting && PRESENT_TEXT.test(v), hitN = wantName && !out.name && SELF_TAG.test(v);
+      if (!hitP && !hitN) continue;
+      const p = n.parentElement;
+      if (skip(p)) continue;
+      if (hitP) out.presenting = true;
+      if (hitN) { // the name may be in the same node or in a sibling span: the element, then its parent
+        for (let el = p, i = 0; el && i < 2; el = el.parentElement, i++) {
+          const m = SELF_LABEL.exec(C.normalize(el.textContent));
+          if (m) { const name = C.normalize(m[1]).replace(/^[^\p{L}\p{N}]+/u, ''); if (name && !C.SELF_WORDS.test(name)) { out.name = name; break; } } // "· Name (You, presenting)": the separator is not part of the name
+        }
+      }
+      if (out.presenting && (!wantName || out.name)) break;
+    }
+    return out;
+  }
+  /** Meet's "You left the meeting" page, noticed at once rather than after three quiet ticks. */
+  function onLeftPage() {
+    for (const b of document.querySelectorAll('button, [role="button"]')) if (/^(rejoin|return to home screen)$/i.test(C.normalize(b.textContent))) return true;
     return false;
   }
   function meetingInfo() {
@@ -119,7 +152,7 @@
       try { sessionStorage.removeItem('meet-capture-panel-open'); } catch (e) { /* fine */ } // a new call starts with the panel as the setting says
     }
     try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(m)); } catch (e) { /* fine */ }
-    Object.assign(state, { inCall: true, missing: 0, meeting: m, ready: false, firstUpdate: true, region: null, strategy: '', transcript: C.createTranscript(), keys: new WeakMap(), avatars: new Map(), captionsOn: null, ccAttempts: 0, ccLastTry: 0, lineCount: 0, snapshotCount: 0, lines: [], snapshots: [], source: null, chosenSource: 'auto', selfPresenting: false });
+    Object.assign(state, { inCall: true, missing: 0, meeting: m, ready: false, firstUpdate: true, region: null, strategy: '', transcript: C.createTranscript(), keys: new WeakMap(), avatars: new Map(), captionsOn: null, ccAttempts: 0, ccLastTry: 0, lineCount: 0, snapshotCount: 0, lines: [], snapshots: [], source: null, chosenSource: 'auto', selfPresenting: false, presentMiss: 0, enteredAt: Date.now() });
     state.pending.clear(); state.outbox.length = 0; detector.reset();
     ui.hideAfterCall();
     send({ type: 'meeting-start', meeting: meetingInfo() });
@@ -177,7 +210,8 @@
   function checkCaptions() {
     const btn = findCaptionsButton();
     state.captionsOn = btn ? isCaptionsOn(btn) : null;
-    if (btn && !state.captionsOn && settings.autoCaptions && !state.region) enableCaptions(false);
+    // Only as the call starts (and again after a reload): captions you turn off later stay off.
+    if (btn && !state.captionsOn && settings.autoCaptions && !state.region && Date.now() - state.enteredAt < 45000) enableCaptions(false);
   }
 
   // ------------------------------------------------------------------ captions region
@@ -297,12 +331,14 @@
   async function snapshotNow(reason) {
     if (!state.inCall) return send({ type: 'toast', text: 'Not in a call.' });
     const pick = pickSource() || state.candidates[0];
-    if (!pick) return send({ type: 'toast', text: 'No video to snapshot. Is someone sharing a screen?' });
+    if (!pick) return tell('No video to snapshot yet. Is someone sharing a screen?');
     const src = await frameOf(pick);
     const ok = takeSnapshot(pick, reason, undefined, src);
     release(src);
-    if (!ok) send({ type: 'toast', text: 'That snapshot did not work.' });
+    if (!ok) tell('That snapshot did not work. Try again in a moment.');
   }
+  /** A short message in the panel, and as a toast on the captures page if it is open. */
+  function tell(text) { ui.notice(text); send({ type: 'toast', text }); }
   function sendCandidates() {
     const cands = C.candidates(document, window);
     if (state.share) cands.unshift(state.share.candidate);
@@ -400,10 +436,13 @@
     if (!chrome.runtime?.id) { clearInterval(loop); clearInterval(snapLoop); clearInterval(pollLoop); ui.destroy(); return; }
     const leave = findLeaveControl();
     if (leave) { state.missing = 0; if (!state.inCall) enterCall(); }
-    else if (state.inCall && ++state.missing >= 3) leaveCall('left the call');
+    else if (state.inCall && (onLeftPage() || ++state.missing >= 3)) leaveCall('left the call');
     if (!state.inCall) { const n = readMyName(); if (n) nameHint = n; return; }
-    const presenting = isSelfPresenting();
-    if (presenting !== !!state.selfPresenting) { state.selfPresenting = presenting; if (!presenting) stopShare(); }
+    const page = readPage(!state.meeting.myName);
+    if (page.name && !state.meeting.myName) { state.meeting.myName = page.name; send({ type: 'meeting-update', meetingId: state.meeting.id, myName: page.name }); try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(state.meeting)); } catch (e) { /* fine */ } }
+    // Presenting: on at once; off only after two quiet ticks, so a re-render of Meet's bar does not end a share capture.
+    if (page.presenting) { state.presentMiss = 0; if (!state.selfPresenting) { state.selfPresenting = true; renderUI(); } }
+    else if (state.selfPresenting && ++state.presentMiss >= 2) { state.selfPresenting = false; stopShare(); }
     checkCaptions();
     checkRegion();
     const title = readTitle();

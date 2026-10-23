@@ -79,7 +79,7 @@ There is no server and no account. The extension runs only on `meet.google.com` 
 | `offscreen/` | a hidden page that builds the ZIP for download (service workers can't make blob URLs) |
 | `app/` | the captures page |
 
-`node test/run.js` runs the unit tests (no network, no browser). `node test/e2e.js` runs the real extension in Chromium against a fake Meet page with a scripted call, and checks the button in the bar, the panel, the captions, the snapshots, the page that opens on leaving, Open in Claude, the ZIP, the folder save, a rename and a reload mid-call.
+`node test/run.js` runs the unit tests (no network, no browser). `node test/e2e.js` runs the real extension in Chromium against a fake Meet page with a scripted call, and checks the button in the bar, the panel, the captions, the snapshots, presenting as Meet shows it, the page that opens on leaving, Open in Claude, the ZIP, the folder save, a rename, a reload mid-call and the settings dialog.
 
 ## Privacy and security
 
@@ -101,7 +101,7 @@ There is no server and no account. The extension runs only on `meet.google.com` 
 - **No capture button in the bar:** the panel still works from the toolbar icon's page; the button is placed next to Meet's Chat button and needs Meet's bar to be there. If Meet's bar is hidden (full-screen, or a very narrow window), move the mouse or widen the window.
 - **The transcript is empty:** captions were off for the call. The transcript says so. Meet's captions are per-person, so they must be on in your own Meet window.
 - **Snapshots show the wrong video:** pick the presentation in the panel's **Snapshots of** menu.
-- **Snapshots of my own share only show the Meet window:** Meet's preview of your share stops updating once the Meet tab is in the background. Click **Capture my share** in the panel and pick the screen or window you're sharing; snapshots then follow whatever is on it. Someone else's share is a video Meet streams to you, and Meet pauses it for a hidden tab, so keep the Meet tab visible while they present.
+- **Snapshots of my own share only show the Meet window:** Meet's preview of your share stops updating once the Meet tab is in the background. When you start presenting, the panel offers **Capture my share**, and the capture button's badge pulses amber until you have opened the panel: pick the screen or window you're sharing, and snapshots then follow whatever is on it. Someone else's share is a video Meet streams to you, and Meet pauses it for a hidden tab, so keep the Meet tab visible while they present.
 - **The captures page did not open when I left:** click the toolbar icon; the meeting is in the list. Check **When you leave a call** in the settings.
 - **"Chrome did not allow writing to the folder":** Chrome needs a click on **Save to folder** to confirm the folder again. Choose a different folder from the settings if it has moved.
 - **"Storage is not available":** Chrome's storage for this extension is blocked or full. Check `chrome://settings/content/siteData`, or delete old meetings in the settings.

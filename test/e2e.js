@@ -61,11 +61,21 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   await page.waitForSelector(`${PANEL}.open`, { timeout: 3000 });
   console.log('panel closes for Meet\'s chat and reopens from the bar button');
 
-  // 2b. Presenting yourself: the panel offers to capture your share. Chrome's picker is auto-selected in this run;
+  // 2b. Presenting yourself, as Meet shows it (a plain-text "Stop presenting" button, "Name (You, presenting)", a preview tile of
+  //     your own share): the bar button's badge turns amber while the panel is closed, the panel offers to capture your share, lists
+  //     Meet's preview under its own name, and your name is read from the page. Chrome's picker is auto-selected in this run;
   //     headless screens can be blank, so only the offer and the capture itself are required to work.
+  await page.click('#meet-capture-button button');
+  await page.waitForFunction(panelFn("return !panel.classList.contains('open');"), null, { timeout: 3000 });
   await page.click('#present');
+  await page.waitForFunction(() => { const h = document.querySelector('#meet-capture-button'); const b = h && h.shadowRoot && h.shadowRoot.querySelector('.badge'); return !!b && b.classList.contains('ask'); }, null, { timeout: 5000 });
+  console.log('presenting: the bar button\'s badge turns amber while the panel is closed');
+  await page.click('#meet-capture-button button');
   await page.waitForSelector(`${PANEL} [data-act="share"]`, { timeout: 5000 });
-  console.log('presenting: the panel offers Capture my share');
+  await page.waitForFunction(panelFn("return [...panel.querySelectorAll('[data-el=\"sources\"] option')].some((o) => /Meet's preview of your share/.test(o.textContent));"), null, { timeout: 8000 });
+  const myName = await sw.evaluate(async () => (await MCC.store.listMeetings())[0].myName);
+  console.log('presenting: the panel offers Capture my share and lists Meet\'s preview of the share by name; your name read from the page:', JSON.stringify(myName));
+  if (myName !== 'Jesh Shiva') errors.push('the name was not read from Meet\'s "(You, presenting)" label: ' + JSON.stringify(myName));
   await page.click(`${PANEL} [data-act="share"]`);
   const shared = await page.waitForFunction(panelFn("return /Capturing your screen share/.test(panel.querySelector('[data-el=\"callout\"]').textContent);"), null, { timeout: 8000 }).then(() => true).catch(() => false);
   if (shared) {
@@ -147,16 +157,30 @@ const panelFn = (body) => new Function('n', `const panel = ${PANEL_FN}; if (!pan
   if (q.origin !== 'https://claude.ai' || !(q.searchParams.get('q') || '').startsWith('# Weekly design sync')) errors.push('Open in Claude did not open claude.ai with the transcript: ' + claude.url());
   await claude.close();
 
-  // 6. One ZIP from the page, with a name set in the settings and meeting.json on.
+  // 6. Settings: Escape drops an edit, Save keeps it, the timer field is greyed out unless a timer is in use.
+  //    Then one ZIP from the page, with a name set in the settings and meeting.json on.
   await app.click('#settings-btn');
   await app.waitForSelector('#settings-form', { timeout: 3000 });
+  await app.fill('#s-myName', 'Nobody');
+  await app.keyboard.press('Escape');
+  await app.waitForFunction(() => !document.querySelector('#settings').open, null, { timeout: 3000 });
+  await sleep(300);
+  const dropped = await sw.evaluate(async () => ((await chrome.storage.local.get('settings')).settings || {}).myName);
+  if (dropped === 'Nobody') errors.push('Escape on the settings dialog kept the edit instead of dropping it');
+  await app.click('#settings-btn');
+  await app.waitForSelector('#settings-form', { timeout: 3000 });
+  if (await app.$eval('#s-myName', (el) => el.value) === 'Nobody') errors.push('the dropped edit came back when the settings were opened again');
+  if (!await app.$eval('#s-snapshotEverySec', (el) => el.disabled)) errors.push('the timer field is not greyed out while snapshots are taken on change only');
   await app.fill('#s-myName', 'Jesh');
   await app.check('input[name="includeJson"]');
   await app.fill('#s-preface', 'Summarise the decisions and list action items with owners.');
-  await sleep(700);
   await app.screenshot({ path: path.join(OUT, '4-app-settings.png') });
-  await app.click('#settings-form .buttons .btn');
+  await app.click('#s-save');
   await app.waitForFunction(() => !document.querySelector('#settings').open, null, { timeout: 3000 });
+  await sleep(500);
+  const saved = await sw.evaluate(async () => ((await chrome.storage.local.get('settings')).settings || {}).myName);
+  if (saved !== 'Jesh') errors.push('Save did not keep the settings: myName is ' + JSON.stringify(saved));
+  console.log('settings: Escape dropped an edit, Save kept the next one, the timer field is greyed out');
   await app.click('[data-act="zip"]');
   const items = await waitForDownloads(sw, 1, 30000);
   const zip = items.find((d) => /\.zip$/.test(d.filename) || d.mime === 'application/zip');

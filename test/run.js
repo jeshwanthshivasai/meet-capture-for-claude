@@ -52,6 +52,11 @@ test('stitch: no overlap means the block started over, so the text is kept and c
   assert.strictEqual(r.full, 'I think we should go I want');
   assert.strictEqual(r.how, 'append');
 });
+test('stitch: a one-word block that becomes something else was recognition\'s first guess, so it is replaced (seen in a real call)', () => {
+  const r = st('I.', 'I.', 'So, oh yeah');
+  assert.deepStrictEqual([r.full, r.how], ['So, oh yeah', 'revise']);
+  assert.strictEqual(st('I think we should go', 'I think we should go', 'I want').how, 'append', 'a longer block is kept');
+});
 test('stitch: a shorter window that is a prefix replaces (recognition took words back)', () => assert.strictEqual(st('Hi there', 'Hi there', 'Hi').full, 'Hi'));
 test('stitch: short words still align when the whole window matches', () => assert.strictEqual(st('Hi', 'Hi', 'Hi there').full, 'Hi there'));
 test('stitch: empty text is ignored, identical text is a no-op', () => {
@@ -142,6 +147,14 @@ test('detector: a picture that keeps changing (video, scrolling) is kept only ev
   for (const f of frames) { const r = d.sample(f, 'v1', t); if (r) { kept.push(t); d.saved(f, t); } t += 1000; }
   assert.deepStrictEqual(kept, [1000, 2000, 3000, 8000], 'three quick ones, then one every 5 s');
 });
+test('cleanLabel: a name from a tile, with Meet\'s icons, controls and its note on your own share left out', () => {
+  assert.strictEqual(M.cleanLabel(['open_in_full', 'Enter Full Screen', 'You are presenting', "To avoid an infinity mirror, don't share your Meet window"]), '');
+  assert.strictEqual(M.cleanLabel(['more_vert', 'Jeshwanth Shiva Sai (You, presenting)']), 'Jeshwanth Shiva Sai');
+  assert.strictEqual(M.cleanLabel(['Sam Okafor (You)']), 'Sam Okafor');
+  assert.strictEqual(M.cleanLabel(['Priya Natarajan is presenting']), 'Priya Natarajan is presenting');
+  assert.strictEqual(M.cleanLabel(['Priya Natarajan is presenting. Click to pin this tile']), 'Priya Natarajan is presenting.');
+  assert.strictEqual(M.cleanLabel(['This is a very long caption line that keeps going on and on without any end']), 'This is a very long caption line that…');
+});
 test('detector: difference and blank', () => {
   assert.strictEqual(M.difference(A, A), 0);
   assert.ok(M.difference(A, B) > 0.1);
@@ -165,23 +178,37 @@ test('transcript: one block that runs on is cut into lines at pauses', () => {
   ]);
   assert.strictEqual(lines[0].updatedAt, 1800);
 });
-test('transcript: a long run breaks at a sentence end, and a cut never lands mid-word', () => {
+test('transcript: cutPoint takes the last sentence end once a run is long, a clause break later, any word later still, never the tail', () => {
+  const L = 10000;
+  const text = 'one two three four five six seven eight nine, ten eleven. Twelve thirteen fourteen fifteen sixteen seventeen';
+  assert.ok(!M.cutPoint(text, L - 1, L), 'not long yet');
+  assert.strictEqual(text.slice(M.cutPoint(text, L, L)), 'Twelve thirteen fourteen fifteen sixteen seventeen');
+  assert.ok(!M.cutPoint('Yes. one two three four five six seven eight nine ten', L, L), 'a sentence end in the first words is no place to cut');
+  const noDot = text.replace('eleven.', 'eleven');
+  assert.ok(!M.cutPoint(noDot, L * 1.4, L), 'no sentence end: the clause rule waits for 15 s');
+  assert.strictEqual(noDot.slice(M.cutPoint(noDot, L * 1.5, L)), 'ten eleven Twelve thirteen fourteen fifteen sixteen seventeen');
+  const plain = noDot.replace('nine,', 'nine');
+  assert.ok(!M.cutPoint(plain, L * 1.8, L), 'no clause break either: the word rule waits for ~19 s');
+  const at = M.cutPoint(plain, L * 1.9, L);
+  assert.ok(at > 0 && plain[at - 1] === ' ' && plain[at] !== ' ', 'a word boundary');
+  assert.ok(plain.length - at >= 12, 'never inside the last twelve characters, which recognition is still revising');
+});
+test('transcript: a long run is cut at a sentence end that arrives late, the second line gets a time of its own, and a revision before the cut keeps both lines', () => {
   let t = 0;
   const tr = M.createTranscript({ now: () => t, longMs: 10000 });
-  let text = 'One.';
-  tr.upsert(1, 'A', text);
-  for (let i = 0; i < 12; i++) { t += 1000; text += ' two'; tr.upsert(1, 'A', text); }   // no sentence end yet: no cut
+  const words = 'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi'.split(' ');
+  let text = '';
+  for (const w of words) { text = text ? text + ' ' + w : w; tr.upsert(1, 'A', text); t += 1000; }   // 14 s, no punctuation yet
   assert.strictEqual(tr.allLines().length, 1);
-  t += 1000; text += ' three.'; tr.upsert(1, 'A', text);
-  t += 1000; text += ' Four five'; tr.upsert(1, 'A', text);                                // after a sentence end, past 10 s: cut here
+  text = text.replace('kappa lambda', 'kappa. Lambda') + ' omicron pi rho'; tr.upsert(1, 'A', text);   // recognition punctuates late (t = 14 s)
   const lines = tr.allLines();
-  assert.strictEqual(lines.length, 2);
-  assert.strictEqual(lines[1].text, 'Four five');
-  t += 1000; text = text.replace('three.', 'three, yes.'); text += ' six'; tr.upsert(1, 'A', text); // a revision before the cut
-  const after = tr.allLines();
-  assert.strictEqual(after.length, 2);
-  assert.ok(after[0].text.endsWith('three, yes.'), after[0].text);
-  assert.strictEqual(after[1].text, 'Four five six');
+  assert.deepStrictEqual(lines.map((l) => [l.text, l.startedAt, l.split]), [
+    ['alpha beta gamma delta epsilon zeta eta theta iota kappa.', 0, false],
+    ['Lambda mu nu xi omicron pi rho', 9227, true],                                                      // 58 of 88 characters into a 14 s run
+  ]);
+  assert.strictEqual(lines[0].updatedAt, 9227);
+  t += 1000; text = text.replace('kappa.', 'kappa, yes.') + ' sigma'; tr.upsert(1, 'A', text);         // a revision before the cut
+  assert.deepStrictEqual(tr.allLines().map((l) => l.text), ['alpha beta gamma delta epsilon zeta eta theta iota kappa, yes.', 'Lambda mu nu xi omicron pi rho sigma']);
 });
 test('transcript: lines of a block with no cuts keep the entry id as before', () => {
   const tr = M.createTranscript({ now: () => 5 });

@@ -131,7 +131,11 @@
       const score = k * 2 - left - (j > 0 ? 1 : 0);
       if (!best || score > best.score) best = { j, k, left, score };
     }
-    if (!best) return { full: full + ' ' + next, win: next, how: 'append', added: next };
+    if (!best) {
+      // A block that was one word and is now something else was recognition's first guess ("I." → "So"): replace it.
+      if (W.length === 1 && full === win) return { full: next, win: next, how: 'revise', added: '' };
+      return { full: full + ' ' + next, win: next, how: 'append', added: next };
+    }
     const keep = best.j === 0 ? '' : win.slice(0, W[best.j].start);
     const tailIsNew = best.left === 0 && N.length > best.k;
     const how = best.j > 0 ? 'scroll' : tailIsNew ? 'grow' : 'revise';
@@ -141,8 +145,30 @@
 
   // ------------------------------------------------------------------ the transcript being built
   const SPLIT_PAUSE_MS = 4000;  // no new words for this long: the next words start a new line
-  const SPLIT_LONG_MS = 40000;  // a line this old breaks at the next sentence end
-  const SENTENCE_END = /[.!?…]["'”’)\]]?$/;
+  const SPLIT_LONG_MS = 40000;  // a line this old is cut at its last sentence end; past 1.5× at a clause break; past ~1.9× at any word
+  const CUT_SENTENCE = /[.!?…]["'”’)\]]?\s+/g;
+  const CUT_CLAUSE = /[,;:]\s+/g;
+  const CUT_WORD = /\s+/g;
+  const TAIL_GUARD = 12;        // characters at the end of a block that recognition is still rewriting: never cut there
+  const MIN_HEAD = 0.4;         // a cut must leave at least this share of the text in front of it: no one-word lines
+
+  /**
+   * Where to cut a segment that has run past the limit: at its last sentence end (the whole text is searched,
+   * so a full stop that Meet adds by a later revision counts), else past 1.5× the limit at its last clause
+   * break, else past ~1.9× at any word boundary. Returns the offset in text, or 0 for none.
+   */
+  function cutPoint(text, ageMs, longMs) {
+    const rules = [[longMs, CUT_SENTENCE], [longMs * 1.5, CUT_CLAUSE], [longMs * 1.875, CUT_WORD]];
+    const limit = text.length - TAIL_GUARD, minHead = text.length * MIN_HEAD;
+    for (const [after, re] of rules) {
+      if (ageMs < after) break;
+      let at = 0;
+      re.lastIndex = 0;
+      for (let m; (m = re.exec(text));) { const end = m.index + m[0].length; if (end > limit) break; if (end >= minHead) at = end; }
+      if (at > 0) return at;
+    }
+    return 0;
+  }
 
   /**
    * Entries keyed by the caption block that produced them. When Meet re-renders its region the same
@@ -210,20 +236,35 @@
       }
     }
 
+    /**
+     * A line that has run past the limit is cut where cutPoint says, anywhere in its text: Meet adds the
+     * punctuation by later revision, so waiting for the text to end in a full stop could wait a minute
+     * (a real call gave one sixty-second line). The new segment is placed in time by its position in the text.
+     */
+    function cutLongRun(e, t) {
+      const last = e.segs[e.segs.length - 1];
+      const age = t - last.startedAt;
+      if (age < longMs) return;
+      const text = e.full.slice(last.at);
+      const at = cutPoint(text, age, longMs);
+      if (!at) return;
+      const abs = last.at + at;
+      const startedAt = Math.min(t, last.startedAt + Math.round(age * at / Math.max(1, text.length)));
+      last.updatedAt = Math.max(last.startedAt, startedAt);
+      e.segs.push({ at: abs, startedAt, updatedAt: t, split: true, anchor: words(e.full.slice(abs)).slice(0, 3).map((x) => x.w) });
+    }
+
     function upsert(key, speaker, text) {
       const e = bind(key, speaker, text);
       const t = now();
       const r = stitch(e.full, e.win, text);
       const changed = r.full !== e.full;
       if (changed) {
-        if (r.added && e.full) {
-          const last = e.segs[e.segs.length - 1];
-          const pause = t - e.updatedAt >= pauseMs;
-          const long = t - last.startedAt >= longMs && SENTENCE_END.test(e.full);
-          if (pause || long) e.segs.push({ at: r.full.length - r.added.length, startedAt: t, updatedAt: t, split: true, anchor: words(r.added).slice(0, 3).map((x) => x.w) });
-        }
+        // New words after a pause start a new line.
+        if (r.added && e.full && t - e.updatedAt >= pauseMs) e.segs.push({ at: r.full.length - r.added.length, startedAt: t, updatedAt: t, split: true, anchor: words(r.added).slice(0, 3).map((x) => x.w) });
         e.full = r.full; e.win = r.win; e.updatedAt = t;
         relocate(e);
+        cutLongRun(e, t);
         e.segs[e.segs.length - 1].updatedAt = t;
       }
       return { entry: e, changed, how: r.how };
@@ -253,5 +294,5 @@
     return { bind, upsert, release, lines, all: () => entries, allLines: () => entries.flatMap(lines), boundKeys: () => [...byKey.keys()] };
   }
 
-  Object.assign(NS, { CAPTION_LABEL_WORDS, REGION_SELECTOR, ITEM_SELECTOR, findRegion, looksLikeCaptions, isItem, items, readItem, stitch, words, commonPrefix, createTranscript });
+  Object.assign(NS, { CAPTION_LABEL_WORDS, REGION_SELECTOR, ITEM_SELECTOR, findRegion, looksLikeCaptions, isItem, items, readItem, stitch, words, commonPrefix, cutPoint, createTranscript });
 })(typeof globalThis !== 'undefined' ? globalThis : this);

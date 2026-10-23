@@ -163,7 +163,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .figure img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: contain; background: #0f1417; box-shadow: 0 0 0 1px var(--line); border-radius: 8px; cursor: zoom-in; transition: box-shadow .4s; }
 .figure.hit img { box-shadow: 0 0 0 3px var(--accent); }
 .figure figcaption { display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: 4px; font: 400 12px/16px var(--sans); color: var(--ink-2); }
-.figure figcaption b { font-weight: 500; color: var(--ink); }
+.figure figcaption b { font-weight: 500; color: var(--ink); white-space: nowrap; flex: none; }
 .figure figcaption .grow { flex: 1; }
 .gap { display: grid; grid-template-columns: var(--margin) minmax(0, 1fr); margin: 22px 0 2px; }
 .gap span { grid-column: 2; display: flex; align-items: center; gap: 10px; font: 400 12px/16px var(--sans); color: var(--ink-2); }
@@ -184,6 +184,9 @@ dialog::backdrop { background: var(--scrim); }
 .dlg { padding: 24px 28px; }
 .dlg h2 { margin: 0 0 2px; font: 500 26px/32px var(--serif); letter-spacing: -.01em; }
 .dlg .sub { margin: 0 0 12px; color: var(--ink-2); }
+.dlg .head { display: flex; align-items: flex-start; gap: 12px; }
+.dlg .head > div { flex: 1; min-width: 0; }
+.dlg .head .ib { margin: -6px -10px 0 0; }
 .dlg .buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 20px; }
 .field { display: grid; gap: 4px; margin: 14px 0; }
 .field label, .field .lbl { font-weight: 500; }
@@ -191,6 +194,8 @@ dialog::backdrop { background: var(--scrim); }
 .field input[type="text"], .field input[type="number"], .field select, .field textarea { width: 100%; padding: 7px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); outline: none; }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft-2); }
 .field textarea { min-height: 72px; resize: vertical; }
+.field input:disabled, .field select:disabled { opacity: .45; cursor: not-allowed; }
+.field:has(> input:disabled) label { color: var(--ink-3); }
 .radios { display: grid; gap: 6px; }
 .radios label, .check { display: flex; align-items: flex-start; gap: 10px; font-weight: 400; cursor: pointer; }
 .radios input, .check input { margin: 3px 0 0; accent-color: var(--accent-ink); }

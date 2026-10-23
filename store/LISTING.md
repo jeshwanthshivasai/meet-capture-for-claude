@@ -113,7 +113,7 @@ Visibility: Public. Regions: all. Price: free.
 
 The likely reasons, and the fix for each:
 
-- **Trademark or impersonation** (the name or listing suggests Google or Anthropic made it): the name avoids leading with either brand, and the summary starts with "Unofficial". If asked, rename to "Meet Capture (unofficial)" in the manifest and listing.
+- **Trademark or impersonation** (the name or listing suggests Google or Anthropic made it): the name avoids leading with either brand, and the summary starts with "Unofficial". If asked, rename to "Meet Capture (unofficial)" in the manifest and listing. The icon is composed from Google's and Anthropic's own marks, which their brand guidelines do not allow third parties to alter or combine; if the review objects to it, replace the icon with a mark of our own (the screen-and-caption icon is in the git history before this change) and resubmit.
 - **Permission not justified:** `downloads` and `unlimitedStorage` are the two reviewers ask about; the justifications above explain the files and the images. If `unlimitedStorage` is still questioned, it can be dropped: snapshots would then be limited by Chrome's default quota, and the panel already reports storage errors.
 - **Insufficient data disclosure:** check that *Personal communications* and *Website content* are ticked and that the privacy policy URL is present.
 - **Recording consent:** if the reviewer asks how participants are informed, point to the README and listing, which tell the user to inform the call, and note that the extension only saves what Meet already displays to the user.

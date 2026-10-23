@@ -1,6 +1,6 @@
-/* The captures page: the meeting as a document. Foundations: Radix Colors (Sand for the neutrals, Jade for
-   the one accent, Amber for the one thing that needs you, Red for delete), Geist for the interface and
-   Newsreader for the words people said. The fonts ship with the extension; nothing is fetched. */
+/* The captures page: the meeting as a document. Foundations: Radix Colors (Sand for the neutrals, Amber for the one
+   thing that needs you, Red for delete) with a terracotta scale from the icon's badge for the one accent, Geist for
+   the interface and Newsreader for the words people said. The fonts ship with the extension; nothing is fetched. */
 @font-face { font-family: "Geist"; font-style: normal; font-weight: 100 900; font-display: block; src: url(fonts/Geist-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 @font-face { font-family: "Geist"; font-style: normal; font-weight: 100 900; font-display: block; src: url(fonts/Geist-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
 @font-face { font-family: "Newsreader"; font-style: normal; font-weight: 400 700; font-display: block; src: url(fonts/Newsreader-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
@@ -14,8 +14,8 @@
   --bg: #fdfdfc; --bg-2: #f9f9f8; --bg-3: #f1f0ef; --bg-4: #e9e8e6; --bg-5: #e2e1de;
   --line: #dad9d6; --line-2: #cfceca; --line-3: #bcbbb5;
   --ink: #21201c; --ink-2: #63635e; --ink-3: #8d8d86;
-  /* Radix Jade: the mint of the icon */
-  --accent: #29a383; --accent-ink: #208368; --accent-deep: #1d3b31; --accent-soft: #e6f7ed; --accent-soft-2: #d6f1e3; --accent-line: #8bceb6; --on-accent: #fff;
+  /* Terracotta, from the badge on the icon (#d97757), stepped like a Radix scale */
+  --accent: #d97757; --accent-ink: #b9603f; --accent-deep: #4b2a1d; --accent-soft: #fbefe8; --accent-soft-2: #f6e0d4; --accent-line: #e9ae93; --on-accent: #fff;
   /* Radix Amber and Red */
   --needs-bg: #fff7c2; --needs-ink: #4f3422;
   --danger: #ce2c31; --danger-bg: #feebec;
@@ -28,10 +28,10 @@
     --bg: #111110; --bg-2: #191918; --bg-3: #222221; --bg-4: #2a2a28; --bg-5: #31312e;
     --line: #3b3a37; --line-2: #494844; --line-3: #62605b;
     --ink: #eeeeec; --ink-2: #b5b3ad; --ink-3: #7c7b74;
-    --accent: #29a383; --accent-ink: #1fd8a4; --accent-deep: #adf0d4; --accent-soft: #0f2e22; --accent-soft-2: #0b3b2c; --accent-line: #246854; --on-accent: #111110;
+    --accent: #d97757; --accent-ink: #f0a98b; --accent-deep: #fbe3d6; --accent-soft: #3b2219; --accent-soft-2: #4d2a1e; --accent-line: #7d4b37; --on-accent: #1a110d;
     --needs-bg: #302008; --needs-ink: #ffe7b3;
     --danger: #ff9592; --danger-bg: #3b1219;
-    --scrim: rgba(0, 0, 0, .7); --shadow: 0 12px 40px rgba(0, 0, 0, .5);
+    --scrim: rgba(0, 0, 0, .7); --shadow: 0 12px 40px rgba(217, 119, 87, .5);
     color-scheme: dark;
   }
 }
@@ -105,7 +105,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .mini.live::after { content: ""; position: absolute; right: -4px; top: -2px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
 .none { margin: 24px 0; color: var(--ink-2); }
 .live { color: var(--accent-ink); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
-.live-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 rgba(41, 163, 131, .5); animation: pulse 1.6s ease-out infinite; }
+.live-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 rgba(217, 119, 87, .5); animation: pulse 1.6s ease-out infinite; }
 @keyframes pulse { to { box-shadow: 0 0 0 7px rgba(41, 163, 131, 0); } }
 
 /* ---------------------------------------------------------------- the first run, a missing meeting, a storage problem */

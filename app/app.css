@@ -1,5 +1,5 @@
 /* The captures page: the meeting as a document. Foundations: Radix Colors (Sand for the neutrals, Amber for the one
-   thing that needs you, Red for delete) with a terracotta scale from the icon's badge for the one accent, Geist for
+   thing that needs you, Red for delete) with a terracotta scale from the icon's starburst for the one accent, Geist for
    the interface and Newsreader for the words people said. The fonts ship with the extension; nothing is fetched. */
 @font-face { font-family: "Geist"; font-style: normal; font-weight: 100 900; font-display: block; src: url(fonts/Geist-latin.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 @font-face { font-family: "Geist"; font-style: normal; font-weight: 100 900; font-display: block; src: url(fonts/Geist-latin-ext.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF; }
@@ -14,7 +14,7 @@
   --bg: #fdfdfc; --bg-2: #f9f9f8; --bg-3: #f1f0ef; --bg-4: #e9e8e6; --bg-5: #e2e1de;
   --line: #dad9d6; --line-2: #cfceca; --line-3: #bcbbb5;
   --ink: #21201c; --ink-2: #63635e; --ink-3: #8d8d86;
-  /* Terracotta, from the badge on the icon (#d97757), stepped like a Radix scale */
+  /* Terracotta, from the starburst on the icon (#d97757), stepped like a Radix scale */
   --accent: #d97757; --accent-ink: #b9603f; --accent-deep: #4b2a1d; --accent-soft: #fbefe8; --accent-soft-2: #f6e0d4; --accent-line: #e9ae93; --on-accent: #fff;
   /* Radix Amber and Red */
   --needs-bg: #fff7c2; --needs-ink: #4f3422;

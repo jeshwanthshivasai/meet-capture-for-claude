@@ -1,6 +1,6 @@
 // Promo art without text, as the Web Store asks: caption lines flowing into a document, with the icon's
 // mark, a screen with a caption, on the shared screen. Same palette as the icon and the panel.
-const { mark, ACCENT } = require('./icon'); // the accent follows the icon's badge
+const { mark, ACCENT } = require('./icon'); // the accent follows the icon's starburst
 const INK = '#12161A', INK2 = '#1F282E', PAPER = '#F4F7F5', SOFT = '#AEB9BF', LINE = '#2C383F';
 
 function defs(w, h) {

@@ -31,7 +31,7 @@ function shot({ title, sub, layout, art }) {
   *{box-sizing:border-box}html,body{margin:0;width:1280px;height:800px;overflow:hidden}
   body{background:linear-gradient(135deg,#26343B 0%,#1F282E 55%,#0F1417 100%);position:relative;font-family:Inter,"Inter Display",system-ui,sans-serif}
   .grid{position:absolute;inset:0;background-image:linear-gradient(to right,rgba(44,56,63,.45) 1px,transparent 1px),linear-gradient(to bottom,rgba(44,56,63,.45) 1px,transparent 1px);background-size:40px 40px}
-  .glow{position:absolute;inset:0;background:radial-gradient(60% 60% at 75% 45%,rgba(76,201,168,.14),transparent 70%)}
+  .glow{position:absolute;inset:0;background:radial-gradient(60% 60% at 75% 45%,rgba(217,119,87,.14),transparent 70%)}
   .brand{position:absolute;right:56px;top:40px;display:flex;align-items:center;gap:10px;color:#AEB9BF;font-weight:600;font-size:18px}
   .brand span{color:#F4F7F5}
   .head{position:absolute;left:84px;${top ? 'top:58px;right:84px' : 'top:0;bottom:0;width:430px;display:flex;flex-direction:column;justify-content:center'}}
@@ -53,7 +53,7 @@ function frame(img, w, address, extra = '') {
     <div style="height:40px;display:flex;align-items:center;gap:9px;padding:0 14px;background:#2B2C30">
       <i style="width:11px;height:11px;border-radius:50%;background:#FF5F57"></i><i style="width:11px;height:11px;border-radius:50%;background:#FEBC2E"></i><i style="width:11px;height:11px;border-radius:50%;background:#28C840"></i>
       <span style="margin-left:12px;flex:1;height:26px;border-radius:13px;background:#1D1E21;color:#C8CBD2;font-size:13px;display:flex;align-items:center;padding:0 12px">${address}</span>
-      <span style="width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:rgba(76,201,168,.16);box-shadow:0 0 0 2px rgba(76,201,168,.45)">${iconSvg(20, 0)}</span>
+      <span style="width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:rgba(255,255,255,.08);box-shadow:0 0 0 2px rgba(255,255,255,.14)">${iconSvg(20, 0)}</span>
     </div>
     <img src="${url(img)}" style="width:${w}px;display:block">
   </div>`;

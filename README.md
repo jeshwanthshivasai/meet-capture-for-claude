@@ -64,7 +64,7 @@ There is no server and no account. The extension runs only on `meet.google.com` 
 - **The UI in Meet.** The bar button and the panel live in shadow roots, so Meet's styles don't reach them and theirs don't reach Meet. The button copies the size and shape of Meet's own buttons; the panel steps aside when you open Meet's chat or people list, as Meet's own panels do.
 - **Storage.** Lines and snapshots go to the extension's own IndexedDB as they arrive, so a crashed tab or a closed laptop loses at most a few seconds.
 - **After the call.** The service worker opens the captures page on the meeting (or saves a ZIP, or both, or nothing: your choice). The page reads the meeting from IndexedDB; **Save to folder** writes files with the File System Access API into the folder you picked, which needs no extra permission and no download prompts.
-- **The look of the page.** One column, set like a document: the words people said in Newsreader, the interface in Geist, colours from the Radix scales, the terracotta of the icon's badge for the one action. Both typefaces ship inside the extension under the SIL Open Font License; nothing is fetched. The choices are written down in [docs/DESIGN.md](docs/DESIGN.md).
+- **The look of the page.** One column, set like a document: the words people said in Newsreader, the interface in Geist, colours from the Radix scales, the terracotta of the icon's starburst for the one action. Both typefaces ship inside the extension under the SIL Open Font License; nothing is fetched. The choices are written down in [docs/DESIGN.md](docs/DESIGN.md).
 
 | File | What it does |
 |---|---|

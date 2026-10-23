@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, '..');
 (async () => {
   const browser = await chromium.launch();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mcc-icons-'));
-  for (const [size, pad, out] of [[16, 0, 'icons/icon16.png'], [32, 1, 'icons/icon32.png'], [48, 2, 'icons/icon48.png'], [128, 16, 'icons/icon128.png']]) {
+  for (const [size, pad, out] of [[16, 0, 'icons/icon16.png'], [32, 1, 'icons/icon32.png'], [48, 2, 'icons/icon48.png'], [128, 12, 'icons/icon128.png']]) {
     const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 });
     const f = path.join(tmp, `${size}.html`);
     fs.writeFileSync(f, `<html><body style="margin:0;background:transparent">${iconSvg(size, pad)}</body></html>`);
